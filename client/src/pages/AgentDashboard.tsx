@@ -10,8 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Plus, Zap, Calendar, Trash2, Copy, CheckCircle, Clock, AlertCircle } from "lucide-react";
+import { Loader2, Plus, Zap, Calendar, Trash2, Copy, CheckCircle, Clock, AlertCircle, Linkedin } from "lucide-react";
 import { toast } from "sonner";
+import LinkedInIntegration from "@/components/LinkedInIntegration";
 
 interface GeneratedPost {
   id: number;
@@ -277,9 +278,10 @@ export default function AgentDashboard() {
           {/* Main Content - Tabs */}
           <div className="lg:col-span-2">
             <Tabs defaultValue="generate" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 bg-card border border-border">
+              <TabsList className="grid w-full grid-cols-3 bg-card border border-border">
                 <TabsTrigger value="generate">Generate Content</TabsTrigger>
                 <TabsTrigger value="posts">Posts ({posts.length})</TabsTrigger>
+                <TabsTrigger value="linkedin">LinkedIn</TabsTrigger>
               </TabsList>
 
               {/* Generate Tab */}
@@ -425,6 +427,11 @@ export default function AgentDashboard() {
                     </Card>
                   ))
                 )}
+              </TabsContent>
+
+              {/* LinkedIn Tab */}
+              <TabsContent value="linkedin" className="space-y-4">
+                <LinkedInIntegration postId={posts[0]?.id} />
               </TabsContent>
             </Tabs>
           </div>
