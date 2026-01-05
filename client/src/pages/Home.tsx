@@ -1,3 +1,4 @@
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Heart, MessageCircle, Share2, TrendingUp } from "lucide-react";
@@ -91,6 +92,10 @@ const platformData = [
 ];
 
 export default function Home() {
+  // The userAuth hooks provides authentication state
+  // To implement login/logout functionality, simply call logout() or redirect to getLoginUrl()
+  let { user, loading, error, isAuthenticated, logout } = useAuth();
+
   const [selectedPost, setSelectedPost] = useState<SocialPost | null>(null);
   const [animatedMetrics, setAnimatedMetrics] = useState({
     totalEngagement: 0,
