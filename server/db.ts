@@ -1,8 +1,4 @@
 import { eq } from "drizzle-orm";
-import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
-import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
-import Database from "better-sqlite3";
-import mysql from "mysql2/promise";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import path from "path";
@@ -14,9 +10,12 @@ export async function getDb() {
   if (!_db) {
     try {
       const dbUrl = ENV.databaseUrl;
+      const isMysql = dbUrl?.startsWith("mysql://");
 
-      if (dbUrl && dbUrl.startsWith("mysql://")) {
+      if (isMysql) {
         console.log("[Database] Connecting to MySQL...");
+        const { drizzle: drizzleMysql } = await import("drizzle-orm/mysql2");
+        const mysql = (await import("mysql2/promise")).default;
 
         // TiDB Cloud and other managed DBs often require SSL
         const connection = await mysql.createConnection({
@@ -29,6 +28,10 @@ export async function getDb() {
         _db = drizzleMysql(connection);
         console.log("[Database] Successfully connected to MySQL");
       } else {
+        console.log("[Database] Connecting to SQLite...");
+        const { drizzle: drizzleSqlite } = await import("drizzle-orm/better-sqlite3");
+        const Database = (await import("better-sqlite3")).default;
+
         let dbPath = dbUrl;
         if (!dbPath || dbPath.includes("://")) {
           dbPath = path.join(process.cwd(), "data", "marketing_agency.db");
@@ -96,11 +99,19 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    // SQLite upsert syntax
-    await db.insert(users).values(values).onConflictDoUpdate({
-      target: users.openId,
-      set: updateSet,
-    });
+    // Drizzle handles upsert differently for MySQL and SQLite
+    const isMysql = ENV.databaseUrl?.startsWith("mysql://");
+
+    if (isMysql) {
+      await db.insert(users).values(values).onDuplicateKeyUpdate({
+        set: updateSet,
+      });
+    } else {
+      await db.insert(users).values(values).onConflictDoUpdate({
+        target: users.openId,
+        set: updateSet,
+      });
+    }
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;

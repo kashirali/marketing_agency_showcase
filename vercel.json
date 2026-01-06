@@ -1,37 +1,21 @@
 {
     "version": 2,
-    "builds": [
+    "rewrites": [
         {
-            "src": "package.json",
-            "use": "@vercel/static-build",
-            "config": {
-                "distDir": "dist/public"
-            }
+            "source": "/api/trpc/(.*)",
+            "destination": "/api/index.ts"
         },
         {
-            "src": "api/**/*.ts",
-            "use": "@vercel/node"
-        }
-    ],
-    "routes": [
-        {
-            "src": "/api/trpc/(.*)",
-            "dest": "/api/index.ts"
+            "source": "/api/oauth/(.*)",
+            "destination": "/api/index.ts"
         },
         {
-            "src": "/api/oauth/(.*)",
-            "dest": "/api/index.ts"
+            "source": "/api/cron",
+            "destination": "/api/cron.ts"
         },
         {
-            "src": "/api/cron",
-            "dest": "/api/cron.ts"
-        },
-        {
-            "handle": "filesystem"
-        },
-        {
-            "src": "/(.*)",
-            "dest": "/index.html"
+            "source": "/(.*)",
+            "destination": "/index.html"
         }
     ],
     "crons": [
