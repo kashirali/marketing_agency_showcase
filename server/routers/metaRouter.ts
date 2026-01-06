@@ -368,7 +368,7 @@ export const metaRouter = router({
       if (!db) throw new Error("Database not available");
 
       // App URL for redirect URI
-      const appUrl = process.env.VITE_APP_URL || "http://localhost:5000";
+      const appUrl = process.env.VITE_APP_URL || "http://localhost:3000";
       const redirectUri = `${appUrl}/agent-dashboard?provider=meta`;
 
       try {
@@ -455,7 +455,7 @@ export const metaRouter = router({
    */
   getAuthUrl: protectedProcedure.query(async () => {
     const clientId = process.env.META_CLIENT_ID;
-    const appUrl = process.env.VITE_APP_URL || "http://localhost:5000";
+    const appUrl = process.env.VITE_APP_URL || "http://localhost:3000";
     const redirectUri = `${appUrl}/agent-dashboard?provider=meta`;
     const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish";
 

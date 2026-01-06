@@ -1,29 +1,37 @@
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import Database from "better-sqlite3";
+import mysql from "mysql2/promise";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import path from "path";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+let _db: any = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
+// Lazily create the drizzle instance
 export async function getDb() {
   if (!_db) {
     try {
-      let dbPath = ENV.databaseUrl;
+      const dbUrl = ENV.databaseUrl;
 
-      // If DATABASE_URL is a MySQL/Postgres string, ignore it for SQLite
-      if (!dbPath || dbPath.includes("://")) {
-        dbPath = path.join(process.cwd(), "data", "marketing_agency.db");
+      if (dbUrl && dbUrl.startsWith("mysql://")) {
+        console.log("[Database] Connecting to MySQL...");
+        const connection = await mysql.createConnection(dbUrl);
+        _db = drizzleMysql(connection);
+        console.log("[Database] Successfully connected to MySQL");
+      } else {
+        let dbPath = dbUrl;
+        if (!dbPath || dbPath.includes("://")) {
+          dbPath = path.join(process.cwd(), "data", "marketing_agency.db");
+        }
+        console.log(`[Database] Connecting to SQLite at: ${dbPath}`);
+        const sqlite = new Database(dbPath);
+        _db = drizzleSqlite(sqlite);
+        console.log("[Database] Successfully connected to SQLite");
       }
-
-      console.log(`[Database] Attempting to connect to SQLite at: ${dbPath}`);
-      const sqlite = new Database(dbPath);
-      _db = drizzle(sqlite);
-      console.log(`[Database] Successfully connected to SQLite`);
     } catch (error) {
-      console.error("[Database] CRITICAL: Failed to connect to SQLite:", error);
+      console.error("[Database] CRITICAL: Failed to connect:", error);
       _db = null;
     }
   }
@@ -42,7 +50,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = {
+    const values: any = {
       openId: user.openId,
     };
     const updateSet: Record<string, unknown> = {};
