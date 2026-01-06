@@ -1,135 +1,189 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer as sqliteInteger, sqliteTable, text as sqliteText } from "drizzle-orm/sqlite-core";
+import { int as mysqlInteger, mysqlTable, text as mysqlText, timestamp as mysqlTimestamp, varchar as mysqlVarchar } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
+const isMysql = process.env.DATABASE_URL?.startsWith("mysql://");
+
+// Helper to define matching columns for both DBs
+function defineTable<T extends string>(name: T, sqliteCols: any, mysqlCols: any) {
+  return isMysql ? mysqlTable(name, mysqlCols) : sqliteTable(name, sqliteCols);
+}
+
 /**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
+ * Core user table
  */
-export const users = sqliteTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. Optional for local auth. */
-  openId: text("openId").unique(),
-  name: text("name"),
-  email: text("email").notNull().unique(),
-  password: text("password"), // Hashed password for local auth
-  loginMethod: text("loginMethod"),
-  role: text("role", { enum: ["user", "admin"] }).default("user").notNull(),
-  createdAt: integer("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: integer("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  lastSignedIn: integer("lastSignedIn", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+export const users = defineTable("users", {
+  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
+  openId: sqliteText("openId").unique(),
+  name: sqliteText("name"),
+  email: sqliteText("email").notNull().unique(),
+  password: sqliteText("password"),
+  loginMethod: sqliteText("loginMethod"),
+  role: sqliteText("role", { enum: ["user", "admin"] }).default("user").notNull(),
+  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+  lastSignedIn: sqliteInteger("lastSignedIn", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+}, {
+  id: mysqlInteger("id").primaryKey().autoincrement(),
+  openId: mysqlVarchar("openId", { length: 255 }).unique(),
+  name: mysqlVarchar("name", { length: 255 }),
+  email: mysqlVarchar("email", { length: 255 }).notNull().unique(),
+  password: mysqlText("password"),
+  loginMethod: mysqlVarchar("loginMethod", { length: 50 }),
+  role: mysqlVarchar("role", { length: 20 }).default("user").notNull(),
+  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
+  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastSignedIn: mysqlTimestamp("lastSignedIn").defaultNow().notNull(),
 });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
 /**
- * Social media accounts configuration table
- * Stores API credentials and settings for different social media platforms
+ * Social media accounts
  */
-export const socialMediaAccounts = sqliteTable("social_media_accounts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId").notNull(),
-  platform: text("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  accountName: text("accountName").notNull(),
-  accessToken: text("accessToken").notNull(),
-  refreshToken: text("refreshToken"),
-  accountId: text("accountId").notNull(),
-  isActive: integer("isActive", { mode: "boolean" }).default(true).notNull(),
-  createdAt: integer("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: integer("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+export const socialMediaAccounts = defineTable("social_media_accounts", {
+  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
+  userId: sqliteInteger("userId").notNull(),
+  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
+  accountName: sqliteText("accountName").notNull(),
+  accessToken: sqliteText("accessToken").notNull(),
+  refreshToken: sqliteText("refreshToken"),
+  accountId: sqliteText("accountId").notNull(),
+  isActive: sqliteInteger("isActive", { mode: "boolean" }).default(true).notNull(),
+  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+}, {
+  id: mysqlInteger("id").primaryKey().autoincrement(),
+  userId: mysqlInteger("userId").notNull(),
+  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
+  accountName: mysqlVarchar("accountName", { length: 255 }).notNull(),
+  accessToken: mysqlText("accessToken").notNull(),
+  refreshToken: mysqlText("refreshToken"),
+  accountId: mysqlVarchar("accountId", { length: 255 }).notNull(),
+  isActive: mysqlInteger("isActive").default(1).notNull(), // Booleans are 0/1 in MySQL
+  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
+  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
-
-export type SocialMediaAccount = typeof socialMediaAccounts.$inferSelect;
-export type InsertSocialMediaAccount = typeof socialMediaAccounts.$inferInsert;
 
 /**
  * AI-generated social media posts
- * Stores content generated by the AI agent for each platform
  */
-export const generatedPosts = sqliteTable("generated_posts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId").notNull(),
-  platform: text("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  title: text("title").notNull(),
-  content: text("content").notNull(),
-  agentId: integer("agentId"), // Link to specific agent config
-  hashtags: text("hashtags"), // JSON array stored as text
-  status: text("status", { enum: ["draft", "scheduled", "published", "failed"] }).default("draft").notNull(),
-  mediaUrl: text("mediaUrl"),
-  mediaType: text("mediaType", { enum: ["image", "video", "carousel"] }),
-  mediaPrompt: text("mediaPrompt"),
-  externalPostId: text("externalPostId"),
-  scheduledAt: integer("scheduledAt", { mode: "timestamp" }),
-  publishedAt: integer("publishedAt", { mode: "timestamp" }),
-  createdAt: integer("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+export const generatedPosts = defineTable("generated_posts", {
+  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
+  userId: sqliteInteger("userId").notNull(),
+  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
+  title: sqliteText("title").notNull(),
+  content: sqliteText("content").notNull(),
+  agentId: sqliteInteger("agentId"),
+  hashtags: sqliteText("hashtags"),
+  status: sqliteText("status", { enum: ["draft", "scheduled", "published", "failed"] }).default("draft").notNull(),
+  mediaUrl: sqliteText("mediaUrl"),
+  mediaType: sqliteText("mediaType", { enum: ["image", "video", "carousel"] }),
+  mediaPrompt: sqliteText("mediaPrompt"),
+  externalPostId: sqliteText("externalPostId"),
+  scheduledAt: sqliteInteger("scheduledAt", { mode: "timestamp" }),
+  publishedAt: sqliteInteger("publishedAt", { mode: "timestamp" }),
+  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+}, {
+  id: mysqlInteger("id").primaryKey().autoincrement(),
+  userId: mysqlInteger("userId").notNull(),
+  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
+  title: mysqlVarchar("title", { length: 255 }).notNull(),
+  content: mysqlText("content").notNull(),
+  agentId: mysqlInteger("agentId"),
+  hashtags: mysqlText("hashtags"),
+  status: mysqlVarchar("status", { length: 20 }).default("draft").notNull(),
+  mediaUrl: mysqlText("mediaUrl"),
+  mediaType: mysqlVarchar("mediaType", { length: 20 }),
+  mediaPrompt: mysqlText("mediaPrompt"),
+  externalPostId: mysqlVarchar("externalPostId", { length: 255 }),
+  scheduledAt: mysqlTimestamp("scheduledAt"),
+  publishedAt: mysqlTimestamp("publishedAt"),
+  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
 });
-
-export type GeneratedPost = typeof generatedPosts.$inferSelect;
-export type InsertGeneratedPost = typeof generatedPosts.$inferInsert;
 
 /**
  * AI Agent Configuration
- * Stores settings for the automated posting agent
  */
-export const aiAgentConfig = sqliteTable("ai_agent_config", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId").notNull(),
-  agentName: text("agentName").notNull(),
-  isActive: integer("isActive", { mode: "boolean" }).default(true).notNull(),
-  postingSchedule: text("postingSchedule"), // JSON object stored as text
-  platforms: text("platforms"), // JSON array stored as text
-  contentStyle: text("contentStyle"),
-  maxPostsPerDay: integer("maxPostsPerDay").default(3).notNull(),
-  includeImages: integer("includeImages", { mode: "boolean" }).default(true).notNull(),
-  includeHashtags: integer("includeHashtags", { mode: "boolean" }).default(true).notNull(),
-  agencyInfo: text("agencyInfo"), // JSON object stored as text
-  selectedAccounts: text("selectedAccounts"), // JSON object mapping platform -> accountId
-  nextRunAt: integer("nextRunAt", { mode: "timestamp" }),
-  createdAt: integer("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: integer("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+export const aiAgentConfig = defineTable("ai_agent_config", {
+  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
+  userId: sqliteInteger("userId").notNull(),
+  agentName: sqliteText("agentName").notNull(),
+  isActive: sqliteInteger("isActive", { mode: "boolean" }).default(true).notNull(),
+  postingSchedule: sqliteText("postingSchedule"),
+  platforms: sqliteText("platforms"),
+  contentStyle: sqliteText("contentStyle"),
+  maxPostsPerDay: sqliteInteger("maxPostsPerDay").default(3).notNull(),
+  includeImages: sqliteInteger("includeImages", { mode: "boolean" }).default(true).notNull(),
+  includeHashtags: sqliteInteger("includeHashtags", { mode: "boolean" }).default(true).notNull(),
+  agencyInfo: sqliteText("agencyInfo"),
+  selectedAccounts: sqliteText("selectedAccounts"),
+  nextRunAt: sqliteInteger("nextRunAt", { mode: "timestamp" }),
+  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+}, {
+  id: mysqlInteger("id").primaryKey().autoincrement(),
+  userId: mysqlInteger("userId").notNull(),
+  agentName: mysqlVarchar("agentName", { length: 255 }).notNull(),
+  isActive: mysqlInteger("isActive").default(1).notNull(),
+  postingSchedule: mysqlText("postingSchedule"),
+  platforms: mysqlText("platforms"),
+  contentStyle: mysqlText("contentStyle"),
+  maxPostsPerDay: mysqlInteger("maxPostsPerDay").default(3).notNull(),
+  includeImages: mysqlInteger("includeImages").default(1).notNull(),
+  includeHashtags: mysqlInteger("includeHashtags").default(1).notNull(),
+  agencyInfo: mysqlText("agencyInfo"),
+  selectedAccounts: mysqlText("selectedAccounts"),
+  nextRunAt: mysqlTimestamp("nextRunAt"),
+  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
+  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
-
-export type AIAgentConfig = typeof aiAgentConfig.$inferSelect;
-export type InsertAIAgentConfig = typeof aiAgentConfig.$inferInsert;
 
 /**
  * Posting logs
- * Tracks all posting attempts and their results
  */
-export const postingLogs = sqliteTable("posting_logs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId").notNull(),
-  postId: integer("postId").notNull(),
-  agentId: integer("agentId"),
-  platform: text("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  status: text("status", { enum: ["success", "failed", "pending"] }).notNull(),
-  platformPostId: text("platformPostId"),
-  errorMessage: text("errorMessage"),
-  attemptedAt: integer("attemptedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+export const postingLogs = defineTable("posting_logs", {
+  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
+  userId: sqliteInteger("userId").notNull(),
+  postId: sqliteInteger("postId").notNull(),
+  agentId: sqliteInteger("agentId"),
+  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
+  status: sqliteText("status", { enum: ["success", "failed", "pending"] }).notNull(),
+  platformPostId: sqliteText("platformPostId"),
+  errorMessage: sqliteText("errorMessage"),
+  attemptedAt: sqliteInteger("attemptedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+}, {
+  id: mysqlInteger("id").primaryKey().autoincrement(),
+  userId: mysqlInteger("userId").notNull(),
+  postId: mysqlInteger("postId").notNull(),
+  agentId: mysqlInteger("agentId"),
+  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
+  status: mysqlVarchar("status", { length: 20 }).notNull(),
+  platformPostId: mysqlVarchar("platformPostId", { length: 255 }),
+  errorMessage: mysqlText("errorMessage"),
+  attemptedAt: mysqlTimestamp("attemptedAt").defaultNow().notNull(),
 });
-
-export type PostingLog = typeof postingLogs.$inferSelect;
-export type InsertPostingLog = typeof postingLogs.$inferInsert;
 
 /**
  * Content templates
- * Reusable templates for content generation
  */
-export const contentTemplates = sqliteTable("content_templates", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("userId").notNull(),
-  name: text("name").notNull(),
-  platform: text("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  template: text("template").notNull(),
-  variables: text("variables"), // JSON array stored as text
-  createdAt: integer("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: integer("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+export const contentTemplates = defineTable("content_templates", {
+  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
+  userId: sqliteInteger("userId").notNull(),
+  name: sqliteText("name").notNull(),
+  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
+  template: sqliteText("template").notNull(),
+  variables: sqliteText("variables"),
+  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
+}, {
+  id: mysqlInteger("id").primaryKey().autoincrement(),
+  userId: mysqlInteger("userId").notNull(),
+  name: mysqlVarchar("name", { length: 255 }).notNull(),
+  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
+  template: mysqlText("template").notNull(),
+  variables: mysqlText("variables"),
+  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
+  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
-
-export type ContentTemplate = typeof contentTemplates.$inferSelect;
-export type InsertContentTemplate = typeof contentTemplates.$inferInsert;
