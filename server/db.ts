@@ -17,7 +17,15 @@ export async function getDb() {
 
       if (dbUrl && dbUrl.startsWith("mysql://")) {
         console.log("[Database] Connecting to MySQL...");
-        const connection = await mysql.createConnection(dbUrl);
+
+        // TiDB Cloud and other managed DBs often require SSL
+        const connection = await mysql.createConnection({
+          uri: dbUrl,
+          ssl: {
+            rejectUnauthorized: true
+          }
+        });
+
         _db = drizzleMysql(connection);
         console.log("[Database] Successfully connected to MySQL");
       } else {
