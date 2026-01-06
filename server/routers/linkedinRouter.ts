@@ -68,7 +68,7 @@ export const linkedinRouter = router({
         return {
           success: true,
           message: "LinkedIn account connected successfully",
-          accountId: (result as any).insertId,
+          accountId: (result as any).lastInsertRowid,
         };
       } catch (error) {
         console.error("Error handling LinkedIn callback:", error);
@@ -187,13 +187,11 @@ export const linkedinRouter = router({
         // Log successful posting
         const logEntry: InsertPostingLog = {
           userId: ctx.user.id,
-          agentConfigId: 0,
-          generatedPostId: input.postId,
+          postId: input.postId,
           platform: "linkedin",
           status: "success",
-          message: `Posted to LinkedIn: ${postResult.url}`,
+          errorMessage: `Posted to LinkedIn: ${postResult.url}`,
           attemptedAt: now,
-          completedAt: now,
         };
 
         await db.insert(postingLogs).values([logEntry]);
@@ -210,12 +208,10 @@ export const linkedinRouter = router({
         // Log failed posting
         const logEntry: InsertPostingLog = {
           userId: ctx.user.id,
-          agentConfigId: 0,
-          generatedPostId: input.postId,
+          postId: input.postId,
           platform: "linkedin",
           status: "failed",
-          message: "Failed to post to LinkedIn",
-          errorDetails: error instanceof Error ? error.message : String(error),
+          errorMessage: error instanceof Error ? error.message : "Failed to post to LinkedIn",
           attemptedAt: new Date(),
         };
 

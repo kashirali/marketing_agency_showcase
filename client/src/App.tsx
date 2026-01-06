@@ -7,11 +7,16 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import AgentDashboard from "./pages/AgentDashboard";
 
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+
 function Router() {
   // make sure to consider if you need authentication function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/login"} component={Login} />
+      <Route path="/register" component={Register} />
       <Route path={"/agent-dashboard"} component={AgentDashboard} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
@@ -28,8 +33,8 @@ function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider
-        defaultTheme="light"
-        // switchable
+        defaultTheme="dark"
+      // switchable
       >
         <TooltipProvider>
           <Toaster />

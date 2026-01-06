@@ -1,19 +1,33 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1767619622311,
-      "tag": "0000_quick_paibok",
+      "version": "6",
+      "when": 1767653487455,
+      "tag": "0000_sweet_tiger_shark",
       "breakpoints": true
     },
     {
       "idx": 1,
-      "version": "5",
-      "when": 1767619701100,
-      "tag": "0001_pretty_cerise",
+      "version": "6",
+      "when": 1767654243004,
+      "tag": "0001_daily_dreadnoughts",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1767699607213,
+      "tag": "0002_lyrical_devos",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1767705293831,
+      "tag": "0003_breezy_gauntlet",
       "breakpoints": true
     }
   ]

@@ -15,6 +15,7 @@ export interface GeneratedContent {
   content: string;
   hashtags: string[];
   platform: string;
+  imagePrompt?: string;
 }
 
 /**
@@ -50,56 +51,88 @@ Respond in JSON format with the following structure:
 {
   "title": "A catchy title or headline (optional, mainly for LinkedIn)",
   "content": "The main post content",
-  "hashtags": ["hashtag1", "hashtag2", ...] or []
+  "hashtags": ["hashtag1", "hashtag2", ...],
+  "image_prompt": "A detailed, artistic description of an image that would complement this post. Focus on a digital marketing or business aesthetic."
 }`;
 
-  try {
-    const response = await invokeLLM({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "social_media_post",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              title: { type: "string", description: "Optional title or headline" },
-              content: { type: "string", description: "Main post content" },
-              hashtags: {
-                type: "array",
-                items: { type: "string" },
-                description: "List of relevant hashtags",
+  let attempts = 0;
+  const maxAttempts = 2;
+
+  while (attempts < maxAttempts) {
+    try {
+      const response = await invokeLLM({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "social_media_post",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Optional title or headline" },
+                content: { type: "string", description: "Main post content" },
+                hashtags: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "List of relevant hashtags",
+                },
+                image_prompt: {
+                  type: "string",
+                  description: "Detailed prompt for AI image generation",
+                },
               },
+              required: ["content", "hashtags", "image_prompt"],
+              additionalProperties: false,
             },
-            required: ["content", "hashtags"],
-            additionalProperties: false,
           },
         },
-      },
-    });
+      });
 
-    const responseContent = response.choices[0]?.message.content;
-    if (!responseContent) {
-      throw new Error("No response from LLM");
+      const responseContent = response.choices[0]?.message.content;
+      if (!responseContent) {
+        throw new Error("No response from LLM");
+      }
+
+      const responseText = typeof responseContent === "string" ? responseContent : (Array.isArray(responseContent) && responseContent[0]?.type === "text" ? (responseContent[0] as any).text : "");
+      const parsed = JSON.parse(responseText);
+
+      const generated: GeneratedContent = {
+        title: parsed.title || "",
+        content: parsed.content,
+        hashtags: parsed.hashtags || [],
+        platform: request.platform,
+        imagePrompt: parsed.image_prompt,
+      };
+
+      // Validate length
+      if (generated.content.length <= platformGuidelines.maxLength) {
+        return generated;
+      }
+
+      console.warn(`[AI Generator] Content too long for ${request.platform} (${generated.content.length} > ${platformGuidelines.maxLength}). Attempt ${attempts + 1} failed.`);
+      attempts++;
+
+      // If final attempt, truncate as last resort
+      if (attempts === maxAttempts) {
+        generated.content = generated.content.substring(0, platformGuidelines.maxLength - 3) + "...";
+        return generated;
+      }
+    } catch (error) {
+      console.error(`[AI Generator] Error generating content (Attempt ${attempts + 1}):`, error);
+      attempts++;
+      if (attempts === maxAttempts) {
+        throw new Error(`Failed to generate content after ${maxAttempts} attempts: ${error instanceof Error ? error.message : "Unknown error"}`);
+      }
+      // Small delay before retry
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-    const responseText = typeof responseContent === "string" ? responseContent : (Array.isArray(responseContent) && responseContent[0]?.type === "text" ? (responseContent[0] as any).text : "");
-    const parsed = JSON.parse(responseText);
-
-    return {
-      title: parsed.title || "",
-      content: parsed.content,
-      hashtags: parsed.hashtags || [],
-      platform: request.platform,
-    };
-  } catch (error) {
-    console.error("Error generating social media content:", error);
-    throw new Error(`Failed to generate content: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
+
+  throw new Error("Unexpected end of content generation loop");
 }
 
 /**

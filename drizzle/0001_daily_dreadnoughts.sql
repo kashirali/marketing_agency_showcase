@@ -1,0 +1,1 @@
+ALTER TABLE `generated_posts` ADD `externalPostId` text;

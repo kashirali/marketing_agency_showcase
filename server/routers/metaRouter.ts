@@ -2,7 +2,8 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { socialMediaAccounts, generatedPosts, postingLogs, InsertPostingLog } from "../../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, or } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import {
   postToFacebook,
   postImageToInstagram,
@@ -12,21 +13,29 @@ import {
   getInstagramInsights,
   handleMetaError,
   validateAccessToken,
+  exchangeCodeForToken,
+  exchangeTokenForLongLived,
+  getFacebookPages,
+  getInstagramBusinessAccount,
 } from "../services/metaService";
 
 export const metaRouter = router({
   /**
    * Validate Meta credentials
    */
-  validateCredentials: publicProcedure.query(async () => {
+  validateCredentials: protectedProcedure.query(async () => {
     try {
       const accessToken = process.env.META_ACCESS_TOKEN;
-
       if (!accessToken) {
         return {
           success: false,
-          error: "Meta access token not configured",
+          message: "Meta access token not configured",
         };
+      }
+
+      // Mock validation for now to avoid blocking if token is dummy
+      if (accessToken === "dummy_token" || accessToken.startsWith("dummy")) {
+        return { success: true, message: "Mock credentials valid", isDemo: true };
       }
 
       const isValid = await validateAccessToken(accessToken);
@@ -34,6 +43,7 @@ export const metaRouter = router({
       return {
         success: isValid,
         message: isValid ? "Credentials are valid" : "Invalid credentials",
+        isDemo: false,
       };
     } catch (error) {
       return {
@@ -50,6 +60,7 @@ export const metaRouter = router({
     .input(
       z.object({
         postId: z.number(),
+        accountId: z.number().optional(), // Database ID of the account
         includeLink: z.boolean().default(false),
         linkUrl: z.string().optional(),
       })
@@ -70,15 +81,37 @@ export const metaRouter = router({
           throw new Error("Post not found or unauthorized");
         }
 
+        // Get account
+        let account;
+        if (input.accountId) {
+          const accounts = await db
+            .select()
+            .from(socialMediaAccounts)
+            .where(and(eq(socialMediaAccounts.id, input.accountId), eq(socialMediaAccounts.userId, ctx.user.id)))
+            .limit(1);
+          account = accounts[0];
+        } else {
+          // Fallback to first active FB account
+          const accounts = await db
+            .select()
+            .from(socialMediaAccounts)
+            .where(and(eq(socialMediaAccounts.platform, "facebook"), eq(socialMediaAccounts.userId, ctx.user.id), eq(socialMediaAccounts.isActive, true)))
+            .limit(1);
+          account = accounts[0];
+        }
+
+        if (!account) throw new Error("Facebook account not found");
+
         // Post to Facebook
         const postRequest = {
           content: post[0].content,
           title: post[0].title,
           hashtags: post[0].hashtags ? JSON.parse(post[0].hashtags) : [],
           link: input.includeLink ? input.linkUrl : undefined,
+          picture: post[0].mediaUrl || undefined,
         };
 
-        const postResult = await postToFacebook(postRequest as any);
+        const postResult = await postToFacebook(account.accessToken, account.accountId, postRequest as any);
 
         if (!postResult.success) {
           throw new Error(postResult.message);
@@ -98,13 +131,11 @@ export const metaRouter = router({
         // Log successful posting
         const logEntry: InsertPostingLog = {
           userId: ctx.user.id,
-          agentConfigId: 0,
-          generatedPostId: input.postId,
+          postId: input.postId,
           platform: "facebook",
           status: "success",
-          message: `Posted to Facebook: ${postResult.url}`,
+          errorMessage: `Posted to Facebook: ${postResult.url} `,
           attemptedAt: now,
-          completedAt: now,
         };
 
         await db.insert(postingLogs).values([logEntry]);
@@ -121,12 +152,10 @@ export const metaRouter = router({
         // Log failed posting
         const logEntry: InsertPostingLog = {
           userId: ctx.user.id,
-          agentConfigId: 0,
-          generatedPostId: input.postId,
+          postId: input.postId,
           platform: "facebook",
           status: "failed",
-          message: "Failed to post to Facebook",
-          errorDetails: error instanceof Error ? error.message : String(error),
+          errorMessage: error instanceof Error ? error.message : String(error),
           attemptedAt: new Date(),
         };
 
@@ -146,6 +175,7 @@ export const metaRouter = router({
     .input(
       z.object({
         postId: z.number(),
+        accountId: z.number().optional(), // Database ID of the account
         mediaType: z.enum(["image", "video", "carousel"]).default("image"),
         imageUrl: z.string().optional(),
         videoUrl: z.string().optional(),
@@ -182,13 +212,34 @@ export const metaRouter = router({
           hashtags: post[0].hashtags ? JSON.parse(post[0].hashtags) : [],
         };
 
+        // Get account
+        let account;
+        if (input.accountId) {
+          const accounts = await db
+            .select()
+            .from(socialMediaAccounts)
+            .where(and(eq(socialMediaAccounts.id, input.accountId), eq(socialMediaAccounts.userId, ctx.user.id)))
+            .limit(1);
+          account = accounts[0];
+        } else {
+          // Fallback to first active IG account
+          const accounts = await db
+            .select()
+            .from(socialMediaAccounts)
+            .where(and(eq(socialMediaAccounts.platform, "instagram"), eq(socialMediaAccounts.userId, ctx.user.id), eq(socialMediaAccounts.isActive, true)))
+            .limit(1);
+          account = accounts[0];
+        }
+
+        if (!account) throw new Error("Instagram account not found");
+
         // Post based on media type
         if (input.mediaType === "image") {
           if (!input.imageUrl) {
             throw new Error("Image URL required for image posts");
           }
 
-          postResult = await postImageToInstagram({
+          postResult = await postImageToInstagram(account.accessToken, account.accountId, {
             ...baseRequest,
             imageUrl: input.imageUrl,
           });
@@ -197,7 +248,7 @@ export const metaRouter = router({
             throw new Error("Video URL required for video posts");
           }
 
-          postResult = await postVideoToInstagram({
+          postResult = await postVideoToInstagram(account.accessToken, account.accountId, {
             ...baseRequest,
             videoUrl: input.videoUrl,
           });
@@ -206,7 +257,7 @@ export const metaRouter = router({
             throw new Error("Carousel items required for carousel posts");
           }
 
-          postResult = await postCarouselToInstagram({
+          postResult = await postCarouselToInstagram(account.accessToken, account.accountId, {
             ...baseRequest,
             carouselItems: input.carouselItems,
           });
@@ -232,13 +283,11 @@ export const metaRouter = router({
         // Log successful posting
         const logEntry: InsertPostingLog = {
           userId: ctx.user.id,
-          agentConfigId: 0,
-          generatedPostId: input.postId,
+          postId: input.postId,
           platform: "instagram",
           status: "success",
-          message: `Posted to Instagram: ${postResult.url}`,
+          errorMessage: `Posted to Instagram: ${postResult.url} `,
           attemptedAt: now,
-          completedAt: now,
         };
 
         await db.insert(postingLogs).values([logEntry]);
@@ -255,12 +304,10 @@ export const metaRouter = router({
         // Log failed posting
         const logEntry: InsertPostingLog = {
           userId: ctx.user.id,
-          agentConfigId: 0,
-          generatedPostId: input.postId,
+          postId: input.postId,
           platform: "instagram",
           status: "failed",
-          message: "Failed to post to Instagram",
-          errorDetails: error instanceof Error ? error.message : String(error),
+          errorMessage: error instanceof Error ? error.message : "Failed to post to Instagram",
           attemptedAt: new Date(),
         };
 
@@ -309,6 +356,117 @@ export const metaRouter = router({
         error: error instanceof Error ? error.message : "Failed to fetch insights",
       };
     }
+  }),
+
+  /**
+   * Handle Meta OAuth callback
+   */
+  handleCallback: protectedProcedure
+    .input(z.object({ code: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database not available");
+
+      // App URL for redirect URI
+      const appUrl = process.env.VITE_APP_URL || "http://localhost:5000";
+      const redirectUri = `${appUrl}/agent-dashboard?provider=meta`;
+
+      try {
+        // 1. Exchange code for short-lived token
+        const shortToken = await exchangeCodeForToken(input.code, redirectUri);
+
+        // 2. Exchange for long-lived token
+        const longToken = await exchangeTokenForLongLived(shortToken);
+
+        // 3. Get Facebook Pages
+        const pages = await getFacebookPages(longToken);
+
+        const results = [];
+
+        for (const page of pages) {
+          // 4. Store Facebook Page
+          const fbAccount = {
+            userId: ctx.user.id,
+            platform: "facebook" as const,
+            accountName: page.name,
+            accountId: page.id,
+            accessToken: page.access_token, // Page token is better for permanent posting
+            isActive: true,
+          };
+
+          // Upsert FB page
+          await db
+            .insert(socialMediaAccounts)
+            .values(fbAccount)
+            .onConflictDoUpdate({
+              target: [socialMediaAccounts.userId, socialMediaAccounts.platform, socialMediaAccounts.accountId],
+              set: {
+                accessToken: fbAccount.accessToken,
+                accountName: fbAccount.accountName,
+                isActive: true,
+                updatedAt: new Date(),
+              }
+            });
+
+          results.push({ platform: "facebook", name: page.name });
+
+          // 5. Check for Instagram account
+          const igAccountData = await getInstagramBusinessAccount(page.id, page.access_token);
+          if (igAccountData) {
+            const igAccount = {
+              userId: ctx.user.id,
+              platform: "instagram" as const,
+              accountName: igAccountData.username || igAccountData.name || `IG via ${page.name}`,
+              accountId: igAccountData.id,
+              accessToken: page.access_token, // IG Graph API uses the page access token
+              isActive: true,
+            };
+
+            // Upsert IG account
+            await db
+              .insert(socialMediaAccounts)
+              .values(igAccount)
+              .onConflictDoUpdate({
+                target: [socialMediaAccounts.userId, socialMediaAccounts.platform, socialMediaAccounts.accountId],
+                set: {
+                  accessToken: igAccount.accessToken,
+                  accountName: igAccount.accountName,
+                  isActive: true,
+                  updatedAt: new Date(),
+                }
+              });
+
+            results.push({ platform: "instagram", name: igAccount.accountName });
+          }
+        }
+
+        return { success: true, accounts: results };
+      } catch (error) {
+        console.error("Meta callback failed:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "Meta integration failed",
+        });
+      }
+    }),
+
+  /**
+   * Get Meta authentication URL
+   */
+  getAuthUrl: protectedProcedure.query(async () => {
+    const clientId = process.env.META_CLIENT_ID;
+    const appUrl = process.env.VITE_APP_URL || "http://localhost:5000";
+    const redirectUri = `${appUrl}/agent-dashboard?provider=meta`;
+    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish";
+
+    if (!clientId) {
+      console.warn("Meta Client ID not configured, returning mock URL");
+      return { url: `${appUrl}/agent-dashboard?provider=meta&code=mock_code` };
+    }
+
+    return {
+      url: `https://www.facebook.com/v18.0/dialog/oauth?client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scope}`
+    };
   }),
 
   /**

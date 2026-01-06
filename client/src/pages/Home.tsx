@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Heart, MessageCircle, Share2, TrendingUp } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -141,13 +142,25 @@ export default function Home() {
             <p className="body-text text-white/90 mb-8 max-w-xl">
               Discover how our data-driven strategies transform social media engagement into measurable business growth. Explore real campaign results and performance metrics.
             </p>
-            <Button
-              size="lg"
-              className="bg-[#0066ff] hover:bg-[#0052cc] text-white cta-text"
-              onClick={() => document.getElementById("posts-section")?.scrollIntoView({ behavior: "smooth" })}
-            >
-              View Campaign Results
-            </Button>
+            <div className="flex gap-4">
+              <Button
+                size="lg"
+                className="bg-[#0066ff] hover:bg-[#0052cc] text-white cta-text"
+                onClick={() => document.getElementById("posts-section")?.scrollIntoView({ behavior: "smooth" })}
+              >
+                View Campaign Results
+              </Button>
+
+              <Link href="/agent-dashboard">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="bg-transparent border-white text-white hover:bg-white/10"
+                >
+                  Manage AI Agent
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </section>

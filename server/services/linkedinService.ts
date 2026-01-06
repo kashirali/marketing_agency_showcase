@@ -147,7 +147,7 @@ export async function postToLinkedIn(
   try {
     const postContent = formatLinkedInPost(request);
 
-    const payload = {
+    const payload: any = {
       author: "urn:li:person:me",
       lifecycleState: "PUBLISHED",
       specificContent: {
@@ -155,12 +155,31 @@ export async function postToLinkedIn(
           shareCommentary: {
             text: postContent,
           },
+          shareMediaCategory: request.imageUrl ? "IMAGE" : "NONE",
         },
       },
       visibility: {
         "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC",
       },
     };
+
+    if (request.imageUrl) {
+      // If we have an image, we need to upload it first and get the URN
+      // In a real flow, the caller might pass the URN directly or we upload here
+      const assetUrn = await uploadImageToLinkedIn(accessToken, request.imageUrl);
+      payload.specificContent["com.linkedin.ugc.PublishContent"].media = [
+        {
+          status: "READY",
+          description: {
+            text: request.title || "Post Image",
+          },
+          media: assetUrn,
+          title: {
+            text: request.title || "Post Image",
+          },
+        },
+      ];
+    }
 
     const response = await axios.post(`${LINKEDIN_API_BASE}/ugcPosts`, payload, {
       headers: {
@@ -188,6 +207,59 @@ export async function postToLinkedIn(
       success: false,
       message: `Failed to post to LinkedIn: ${axiosError.message}`,
     };
+  }
+}
+
+/**
+ * Upload an image to LinkedIn and return the asset URN
+ */
+export async function uploadImageToLinkedIn(
+  accessToken: string,
+  imageUrl: string
+): Promise<string> {
+  try {
+    // 1. Register the upload
+    const registerPayload = {
+      registerUploadRequest: {
+        recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
+        owner: "urn:li:person:me",
+        serviceRelationships: [
+          {
+            relationshipType: "OWNER",
+            identifier: "urn:li:userGeneratedContent",
+          },
+        ],
+      },
+    };
+
+    const registerResponse = await axios.post(
+      `${LINKEDIN_API_BASE}/assets?action=registerUpload`,
+      registerPayload,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const uploadUrl = registerResponse.data.value.uploadMechanism["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"].uploadUrl;
+    const assetUrn = registerResponse.data.value.asset;
+
+    // 2. Download the image from URL and upload to LinkedIn
+    const imageResponse = await axios.get(imageUrl, { responseType: "arraybuffer" });
+
+    await axios.post(uploadUrl, imageResponse.data, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": imageResponse.headers["content-type"] || "image/jpeg",
+      },
+    });
+
+    return assetUrn;
+  } catch (error) {
+    console.error("Error uploading image to LinkedIn:", error);
+    throw new Error("Failed to upload image to LinkedIn");
   }
 }
 

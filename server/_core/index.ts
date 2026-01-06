@@ -7,6 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { executeDailyPostingJob, publishDuePosts } from "../services/scheduledPostingService";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -28,6 +29,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  console.log("[Server] Starting with Phase 1 Foundation enhancements...");
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -59,6 +61,22 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+
+    // Start background automation
+    console.log("[Server] Initializing background automation scheduler...");
+
+    // 1. Check for due posts every hour
+    setInterval(() => {
+      publishDuePosts().catch(err => console.error("[Scheduler] Error in publishDuePosts:", err));
+    }, 1000 * 60 * 60);
+
+    // 2. Run daily generation job every 12 hours
+    setInterval(() => {
+      executeDailyPostingJob().catch(err => console.error("[Scheduler] Error in executeDailyPostingJob:", err));
+    }, 1000 * 60 * 60 * 12);
+
+    // Run initial check for due posts on startup
+    publishDuePosts().catch(err => console.error("[Scheduler] Initial publishDuePosts failed:", err));
   });
 }
 

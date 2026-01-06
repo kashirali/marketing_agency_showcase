@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { generateSocialMediaContent, generateContentVariations } from "../services/aiContentGenerator";
+import { generateImage } from "../services/imageService";
 import { getDb } from "../db";
-import { aiAgentConfig, generatedPosts, InsertGeneratedPost } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { aiAgentConfig, generatedPosts, InsertGeneratedPost, socialMediaAccounts } from "../../drizzle/schema";
+import { eq, desc, and } from "drizzle-orm";
+import { publishPost } from "../services/scheduledPostingService";
 
 export const aiAgentRouter = router({
   /**
@@ -23,11 +25,14 @@ export const aiAgentRouter = router({
           description: z.string().optional(),
           achievements: z.array(z.string()).optional(),
         }),
+        selectedAccounts: z.record(z.string(), z.number()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database not available");
+      if (!db) {
+        throw new Error("Database not available");
+      }
 
       const schedule = {
         time: input.postingTime,
@@ -39,34 +44,86 @@ export const aiAgentRouter = router({
         userId: ctx.user.id,
         agentName: input.agentName || "BinaryKode Daily Poster",
         isActive: true,
-        postingSchedule: schedule,
-        platforms: input.platforms,
+        postingSchedule: JSON.stringify(schedule),
+        platforms: JSON.stringify(input.platforms),
         contentStyle: input.contentStyle,
-        agencyInfo: input.agencyInfo,
+        agencyInfo: JSON.stringify(input.agencyInfo),
+        selectedAccounts: JSON.stringify(input.selectedAccounts || {}),
         maxPostsPerDay: 1,
         includeImages: true,
         includeHashtags: true,
         nextRunAt: calculateNextRunTime(input.postingTime, input.timezone),
       });
 
-      return { success: true, agentId: (result as any).insertId };
+      return { success: true, agentId: Number((result as any).lastInsertRowid) };
     }),
+
+  /**
+   * Get all agent configurations for a user
+   */
+  getConfigs: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) {
+      throw new Error("Database not available");
+    }
+
+    const result = await db
+      .select()
+      .from(aiAgentConfig)
+      .where(eq(aiAgentConfig.userId, ctx.user.id))
+      .orderBy(desc(aiAgentConfig.createdAt));
+
+    return result.map(config => ({
+      ...config,
+      platforms: JSON.parse(config.platforms || "[]"),
+      postingSchedule: JSON.parse(config.postingSchedule || "{}"),
+      agencyInfo: JSON.parse(config.agencyInfo || "{}"),
+      selectedAccounts: JSON.parse(config.selectedAccounts || "{}"),
+    }));
+  }),
 
   /**
    * Get current agent configuration
    */
-  getConfig: protectedProcedure.query(async ({ ctx }) => {
-    const db = await getDb();
-    if (!db) throw new Error("Database not available");
+  getConfig: protectedProcedure
+    .input(z.object({ agentId: z.number().optional() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) {
+        throw new Error("Database not available");
+      }
 
-    const config = await db
-      .select()
-      .from(aiAgentConfig)
-      .where(eq(aiAgentConfig.userId, ctx.user.id))
-      .limit(1);
+      let query = db
+        .select()
+        .from(aiAgentConfig)
+        .where(eq(aiAgentConfig.userId, ctx.user.id));
 
-    return config[0] || null;
-  }),
+      if (input.agentId) {
+        query = db.select().from(aiAgentConfig).where(
+          and(
+            eq(aiAgentConfig.userId, ctx.user.id),
+            eq(aiAgentConfig.id, input.agentId)
+          )
+        ) as any;
+      }
+
+      const result = await query.limit(1);
+
+      if (result.length === 0) {
+        return null;
+      }
+
+      const config = result[0];
+
+      // Deserialize JSON fields
+      return {
+        ...config,
+        platforms: JSON.parse(config.platforms || "[]"),
+        postingSchedule: JSON.parse(config.postingSchedule || "{}"),
+        agencyInfo: JSON.parse(config.agencyInfo || "{}"),
+        selectedAccounts: JSON.parse(config.selectedAccounts || "{}"),
+      };
+    }),
 
   /**
    * Update agent configuration
@@ -74,87 +131,187 @@ export const aiAgentRouter = router({
   updateConfig: protectedProcedure
     .input(
       z.object({
+        agentId: z.number(),
         isActive: z.boolean().optional(),
+        agentName: z.string().optional(),
         platforms: z.array(z.enum(["linkedin", "facebook", "twitter", "instagram"])).optional(),
+        postingTime: z.string().optional(),
+        timezone: z.string().optional(),
         contentStyle: z.string().optional(),
         maxPostsPerDay: z.number().optional(),
         includeImages: z.boolean().optional(),
         includeHashtags: z.boolean().optional(),
+        agencyInfo: z.object({
+          name: z.string(),
+          services: z.array(z.string()),
+          description: z.string().optional(),
+          achievements: z.array(z.string()).optional(),
+        }).optional(),
+        selectedAccounts: z.record(z.string(), z.number()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database not available");
+      if (!db) {
+        throw new Error("Database not available");
+      }
 
       const updateData: any = {};
       if (input.isActive !== undefined) updateData.isActive = input.isActive;
-      if (input.platforms) updateData.platforms = input.platforms;
+      if (input.agentName) updateData.agentName = input.agentName;
+      if (input.platforms) updateData.platforms = JSON.stringify(input.platforms);
       if (input.contentStyle) updateData.contentStyle = input.contentStyle;
       if (input.maxPostsPerDay) updateData.maxPostsPerDay = input.maxPostsPerDay;
       if (input.includeImages !== undefined) updateData.includeImages = input.includeImages;
       if (input.includeHashtags !== undefined) updateData.includeHashtags = input.includeHashtags;
+      if (input.agencyInfo) updateData.agencyInfo = JSON.stringify(input.agencyInfo);
+      if (input.selectedAccounts) updateData.selectedAccounts = JSON.stringify(input.selectedAccounts);
+
+      // Update schedule if time or timezone changes
+      if (input.postingTime || input.timezone) {
+        const currentConfig = await db
+          .select()
+          .from(aiAgentConfig)
+          .where(
+            and(
+              eq(aiAgentConfig.userId, ctx.user.id),
+              eq(aiAgentConfig.id, input.agentId)
+            )
+          )
+          .limit(1);
+
+        if (currentConfig[0]) {
+          const currentSchedule = currentConfig[0].postingSchedule
+            ? JSON.parse(currentConfig[0].postingSchedule)
+            : { daysOfWeek: [1, 2, 3, 4, 5] };
+
+          const newSchedule = {
+            ...currentSchedule,
+            time: input.postingTime || currentSchedule.time,
+            timezone: input.timezone || currentSchedule.timezone || "UTC"
+          };
+
+          updateData.postingSchedule = JSON.stringify(newSchedule);
+
+          updateData.nextRunAt = calculateNextRunTime(
+            input.postingTime || currentSchedule.time || "09:00",
+            input.timezone || currentSchedule.timezone || "UTC"
+          );
+        }
+      }
+
+      updateData.updatedAt = new Date();
+
       if (Object.keys(updateData).length === 0) return { success: true };
 
       await db
         .update(aiAgentConfig)
         .set(updateData)
-        .where(eq(aiAgentConfig.userId, ctx.user.id));
+        .where(
+          and(
+            eq(aiAgentConfig.userId, ctx.user.id),
+            eq(aiAgentConfig.id, input.agentId)
+          )
+        );
 
       return { success: true };
     }),
 
   /**
-   * Generate content for a specific platform
+   * Get all connected social media accounts for the current user
+   */
+  getConnectedAccounts: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Database not available");
+
+    const accounts = await db
+      .select()
+      .from(socialMediaAccounts)
+      .where(eq(socialMediaAccounts.userId, ctx.user.id))
+      .orderBy(desc(socialMediaAccounts.createdAt));
+
+    return accounts;
+  }),
+
+  /**
+   * Generate content for a specific platform and agent
    */
   generateContent: protectedProcedure
     .input(
       z.object({
         platform: z.enum(["linkedin", "facebook", "twitter", "instagram"]),
         tone: z.enum(["professional", "casual", "energetic", "educational"]).default("professional"),
+        agentId: z.number().optional(), // If not provided, use the first active agent
       })
     )
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database not available");
-
-      // Get agent configuration
-      const config = await db
-        .select()
-        .from(aiAgentConfig)
-        .where(eq(aiAgentConfig.userId, ctx.user.id))
-        .limit(1);
-
-      if (!config[0]) {
-        throw new Error("Agent not configured. Please initialize the agent first.");
+      if (!db) {
+        throw new Error("Database not available");
       }
 
-      const agencyInfo = config[0].agencyInfo as any;
+      // Get agent configuration
+      let query = db
+        .select()
+        .from(aiAgentConfig)
+        .where(eq(aiAgentConfig.userId, ctx.user.id));
+
+      if (input.agentId) {
+        query = db.select().from(aiAgentConfig).where(
+          and(
+            eq(aiAgentConfig.userId, ctx.user.id),
+            eq(aiAgentConfig.id, input.agentId)
+          )
+        ) as any;
+      }
+
+      const configResult = await query.limit(1);
+
+      if (configResult.length === 0) {
+        throw new Error("Agent not configured. Please initialize an agent first.");
+      }
+
+      const config = configResult[0];
+      const agencyInfo = JSON.parse(config.agencyInfo || "{}");
 
       // Generate content
       const content = await generateSocialMediaContent({
-        agencyName: agencyInfo.name,
-        services: agencyInfo.services,
+        agencyName: agencyInfo.name || "Agency",
+        services: agencyInfo.services || [],
         tone: input.tone,
         platform: input.platform,
-        includeHashtags: config[0].includeHashtags,
-        style: config[0].contentStyle || undefined,
+        includeHashtags: config.includeHashtags || true,
+        style: config.contentStyle || undefined,
         recentAchievements: agencyInfo.achievements,
       });
+
+      // Generate image
+      let mediaUrl: string | undefined;
+      if (content.imagePrompt) {
+        const imageResult = await generateImage(content.imagePrompt);
+        if (imageResult.success) {
+          mediaUrl = imageResult.url;
+        }
+      }
 
       // Save to database
       const insertData: InsertGeneratedPost = {
         userId: ctx.user.id,
+        agentId: config.id,
         platform: input.platform,
         title: content.title,
         content: content.content,
         hashtags: JSON.stringify(content.hashtags),
+        mediaUrl: mediaUrl,
+        mediaType: mediaUrl ? "image" : null,
+        mediaPrompt: content.imagePrompt,
         status: "draft",
       };
 
       const result = await db.insert(generatedPosts).values(insertData);
 
       return {
-        id: (result as any).insertId,
+        id: Number((result as any).lastInsertRowid),
         ...content,
       };
     }),
@@ -172,30 +329,33 @@ export const aiAgentRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database not available");
+      if (!db) {
+        throw new Error("Database not available");
+      }
 
       // Get agent configuration
-      const config = await db
+      const configResult = await db
         .select()
         .from(aiAgentConfig)
         .where(eq(aiAgentConfig.userId, ctx.user.id))
         .limit(1);
 
-      if (!config[0]) {
+      if (configResult.length === 0) {
         throw new Error("Agent not configured");
       }
 
-      const agencyInfo = config[0].agencyInfo as any;
+      const config = configResult[0];
+      const agencyInfo = JSON.parse(config.agencyInfo || "{}");
 
       // Generate variations
       const variations = await generateContentVariations(
         {
-          agencyName: agencyInfo.name,
-          services: agencyInfo.services,
+          agencyName: agencyInfo.name || "Agency",
+          services: agencyInfo.services || [],
           tone: input.tone,
           platform: input.platform,
-          includeHashtags: config[0].includeHashtags,
-          style: config[0].contentStyle || undefined,
+          includeHashtags: config.includeHashtags || true,
+          style: config.contentStyle || undefined,
           recentAchievements: agencyInfo.achievements,
         },
         input.count
@@ -204,19 +364,32 @@ export const aiAgentRouter = router({
       // Save all variations
       const savedVariations = [];
       for (const variation of variations) {
+        // Generate image for each variation
+        let mediaUrl: string | undefined;
+        if (variation.imagePrompt) {
+          const imageResult = await generateImage(variation.imagePrompt);
+          if (imageResult.success) {
+            mediaUrl = imageResult.url;
+          }
+        }
+
         const insertData: InsertGeneratedPost = {
           userId: ctx.user.id,
           platform: input.platform,
           title: variation.title,
           content: variation.content,
           hashtags: JSON.stringify(variation.hashtags),
+          mediaUrl: mediaUrl,
+          mediaType: mediaUrl ? "image" : null,
+          mediaPrompt: variation.imagePrompt,
           status: "draft",
         };
 
         const result = await db.insert(generatedPosts).values(insertData);
         savedVariations.push({
-          id: (result as any).insertId,
+          id: Number((result as any).lastInsertRowid),
           ...variation,
+          mediaUrl,
         });
       }
 
@@ -231,34 +404,45 @@ export const aiAgentRouter = router({
       z.object({
         status: z.enum(["draft", "scheduled", "published", "failed"]).optional(),
         platform: z.enum(["linkedin", "facebook", "twitter", "instagram"]).optional(),
+        agentId: z.number().optional(),
         limit: z.number().default(10),
       })
     )
     .query(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database not available");
+      if (!db) {
+        throw new Error("Database not available");
+      }
+
+      let query = db.select().from(generatedPosts).where(eq(generatedPosts.userId, ctx.user.id));
+
+      // Note: Drizzle's dynamic query building is a bit verbose without query builder
+      // We'll filter in memory for now if needed, but where clause assumes single condition
+      // For more complex AND conditions we need proper where chaining
+
+      // Let's use the basic select and filter locally if complex, 
+      // or construct where clause if possible. 
+      // Since we want to clean this up, let's just get all user posts and filter/sort
+      // ideally we should use db filtering:
 
       const posts = await db
         .select()
         .from(generatedPosts)
-        .where(
-          input.status && input.platform
-            ? eq(generatedPosts.userId, ctx.user.id)
-            : input.status
-            ? eq(generatedPosts.userId, ctx.user.id)
-            : input.platform
-            ? eq(generatedPosts.userId, ctx.user.id)
-            : eq(generatedPosts.userId, ctx.user.id)
-        )
-        .limit(input.limit);
+        .where(eq(generatedPosts.userId, ctx.user.id))
+        .orderBy(desc(generatedPosts.createdAt));
+      // .limit(input.limit); // Applied after filtering in memory for simple implementation
 
-      return posts
+      // Filter in memory for simplicity in this migration step
+      const filteredPosts = posts
         .filter((post) => !input.status || post.status === input.status)
         .filter((post) => !input.platform || post.platform === input.platform)
-        .map((post) => ({
-          ...post,
-          hashtags: post.hashtags ? JSON.parse(post.hashtags) : [],
-        }));
+        .filter((post) => !input.agentId || post.agentId === input.agentId)
+        .slice(0, input.limit);
+
+      return filteredPosts.map((post) => ({
+        ...post,
+        hashtags: post.hashtags ? JSON.parse(post.hashtags) : [],
+      }));
     }),
 
   /**
@@ -268,7 +452,7 @@ export const aiAgentRouter = router({
     .input(
       z.object({
         postId: z.number(),
-        scheduledAt: z.date(),
+        scheduledAt: z.string().or(z.date()).transform(val => new Date(val)),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -309,6 +493,19 @@ export const aiAgentRouter = router({
       await db.delete(generatedPosts).where(eq(generatedPosts.id, input.postId));
 
       return { success: true };
+    }),
+
+  /**
+   * Publish a post immediately
+   */
+  publishPostNow: protectedProcedure
+    .input(z.object({ postId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await publishPost(ctx.user.id, input.postId);
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+      return result;
     }),
 });
 

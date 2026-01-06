@@ -1,7 +1,10 @@
 import { getDb } from "../db";
-import { aiAgentConfig, generatedPosts, postingLogs, InsertPostingLog } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { aiAgentConfig, generatedPosts, postingLogs, InsertPostingLog, socialMediaAccounts } from "../../drizzle/schema";
+import { eq, and, lte } from "drizzle-orm";
 import { generateSocialMediaContent } from "./aiContentGenerator";
+import * as linkedinService from "./linkedinService";
+import * as metaService from "./metaService";
+import { generateImage } from "./imageService";
 
 /**
  * Service to handle scheduled posting of AI-generated content
@@ -14,6 +17,44 @@ export interface PostingResult {
   platform: string;
   message: string;
   error?: string;
+}
+
+/**
+ * Find and publish all due scheduled posts
+ * Call this periodically to process the posting queue
+ */
+export async function publishDuePosts(): Promise<void> {
+  console.log("[AI Agent] Checking for due scheduled posts...");
+
+  const db = await getDb();
+  if (!db) {
+    console.error("[AI Agent] Database not available");
+    return;
+  }
+
+  try {
+    const now = new Date();
+
+    // Find posts with status 'scheduled' and scheduledAt <= now
+    const duePosts = await db
+      .select()
+      .from(generatedPosts)
+      .where(
+        and(
+          eq(generatedPosts.status, "scheduled"),
+          lte(generatedPosts.scheduledAt, now)
+        )
+      );
+
+    console.log(`[AI Agent] Found ${duePosts.length} due posts`);
+
+    for (const post of duePosts) {
+      await publishPost(post.userId, post.id);
+    }
+
+  } catch (error) {
+    console.error("[AI Agent] Error in publishDuePosts:", error);
+  }
 }
 
 /**
@@ -54,8 +95,10 @@ export async function executeDailyPostingJob(): Promise<void> {
 async function processAgentPosting(db: any, agent: any): Promise<void> {
   try {
     const now = new Date();
-    const agencyInfo = agent.agencyInfo;
-    const platforms = agent.platforms as string[];
+    // Parse JSON fields
+    const agencyInfo = JSON.parse(agent.agencyInfo || "{}");
+    const platforms = JSON.parse(agent.platforms || "[]") as string[];
+    const schedule = JSON.parse(agent.postingSchedule || "{}");
 
     console.log(`[AI Agent] Processing agent ${agent.agentName} for user ${agent.userId}`);
 
@@ -63,8 +106,8 @@ async function processAgentPosting(db: any, agent: any): Promise<void> {
     for (const platform of platforms) {
       try {
         const content = await generateSocialMediaContent({
-          agencyName: agencyInfo.name,
-          services: agencyInfo.services,
+          agencyName: agencyInfo.name || "Agency",
+          services: agencyInfo.services || [],
           tone: "professional",
           platform: platform as any,
           includeHashtags: agent.includeHashtags,
@@ -72,30 +115,40 @@ async function processAgentPosting(db: any, agent: any): Promise<void> {
           recentAchievements: agencyInfo.achievements,
         });
 
+        // 2. Generate an image for the post if we have a prompt
+        let mediaUrl: string | undefined;
+        if (content.imagePrompt) {
+          const imageResult = await generateImage(content.imagePrompt);
+          if (imageResult.success) {
+            mediaUrl = imageResult.url;
+          }
+        }
+
         // Save generated post
-        const insertData: any = {
+        const insertData = {
           userId: agent.userId,
           platform: platform as "linkedin" | "facebook" | "twitter" | "instagram",
           title: content.title,
           content: content.content,
           hashtags: JSON.stringify(content.hashtags),
+          mediaUrl: mediaUrl,
+          mediaType: mediaUrl ? ("image" as const) : null,
+          mediaPrompt: content.imagePrompt,
           status: "scheduled" as const,
           scheduledAt: new Date(now.getTime() + 5 * 60 * 1000),
         };
 
         const result = await db.insert(generatedPosts).values([insertData]);
-        const postId = (result as any).insertId;
+        const postId = Number((result as any).lastInsertRowid);
 
         // Log successful generation
         const logEntry: InsertPostingLog = {
           userId: agent.userId,
-          agentConfigId: agent.id,
-          generatedPostId: postId,
+          postId: postId,
           platform: platform as "linkedin" | "facebook" | "twitter" | "instagram",
           status: "success",
-          message: `Generated content for ${platform}`,
+          errorMessage: `Generated content for ${platform}`,
           attemptedAt: now,
-          completedAt: now,
         };
 
         await db.insert(postingLogs).values(logEntry);
@@ -105,17 +158,9 @@ async function processAgentPosting(db: any, agent: any): Promise<void> {
         console.error(`[AI Agent] Error generating content for ${platform}:`, error);
 
         // Log failure
-        const logEntry: InsertPostingLog = {
-          userId: agent.userId,
-          agentConfigId: agent.id,
-          platform: platform as "linkedin" | "facebook" | "twitter" | "instagram",
-          status: "failed",
-          message: `Failed to generate content`,
-          errorDetails: error instanceof Error ? error.message : String(error),
-          attemptedAt: now,
-        };
-
-        await db.insert(postingLogs).values(logEntry);
+        // We can't log 'postId' if generation failed, so we'll skip DB log or use a placeholder if essential
+        // But schema requires postId. So we can't insert into postingLogs without a post.
+        // We'll just log to console.
       }
     }
 
@@ -123,8 +168,8 @@ async function processAgentPosting(db: any, agent: any): Promise<void> {
     await db
       .update(aiAgentConfig)
       .set({
-        lastRunAt: now,
-        nextRunAt: calculateNextRunTime(agent.postingSchedule),
+        nextRunAt: calculateNextRunTime(schedule),
+        updatedAt: new Date(),
       })
       .where(eq(aiAgentConfig.id, agent.id));
   } catch (error) {
@@ -138,6 +183,10 @@ async function processAgentPosting(db: any, agent: any): Promise<void> {
 function calculateNextRunTime(schedule: any): Date {
   const now = new Date();
   const nextRun = new Date(now);
+
+  if (!schedule.time) {
+    return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  }
 
   // Parse posting time (HH:mm format)
   const [hours, minutes] = schedule.time.split(":").map(Number);
@@ -203,20 +252,22 @@ export async function triggerManualPosting(userId: number, agentConfigId: number
   }
 
   const results: PostingResult[] = [];
+  const platforms = JSON.parse(agent[0].platforms || "[]") as string[];
+  const agencyInfo = JSON.parse(agent[0].agencyInfo || "{}");
 
-  for (const platform of agent[0].platforms as string[]) {
+  for (const platform of platforms) {
     try {
       const content = await generateSocialMediaContent({
-        agencyName: (agent[0].agencyInfo as any).name,
-        services: (agent[0].agencyInfo as any).services,
+        agencyName: agencyInfo.name || "Agency",
+        services: agencyInfo.services || [],
         tone: "professional",
         platform: platform as any,
         includeHashtags: agent[0].includeHashtags,
         style: agent[0].contentStyle || undefined,
-        recentAchievements: (agent[0].agencyInfo as any).achievements,
+        recentAchievements: agencyInfo.achievements,
       });
 
-      const insertData: any = {
+      const insertData = {
         userId,
         platform: platform as "linkedin" | "facebook" | "twitter" | "instagram",
         title: content.title,
@@ -229,7 +280,7 @@ export async function triggerManualPosting(userId: number, agentConfigId: number
 
       results.push({
         success: true,
-        postId: (result as any).insertId,
+        postId: Number((result as any).lastInsertRowid),
         platform,
         message: `Successfully generated content for ${platform}`,
       });
@@ -247,9 +298,9 @@ export async function triggerManualPosting(userId: number, agentConfigId: number
 }
 
 /**
- * Publish a scheduled post (simulated - in production, this would call social media APIs)
+ * Publish a scheduled post using real social media APIs
  */
-export async function publishPost(userId: number, postId: number): Promise<PostingResult> {
+export async function publishPost(userId: number, postId: number, retryCount: number = 0): Promise<PostingResult> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -264,31 +315,66 @@ export async function publishPost(userId: number, postId: number): Promise<Posti
   }
 
   try {
-    // In production, this would integrate with social media APIs
-    // For now, we'll simulate successful publishing
     const now = new Date();
+
+    const account = await findSelectedAccount(db, post[0]);
+    if (!account) {
+      throw new Error(`No active ${post[0].platform} account found for this user/agent`);
+    }
+
+    let serviceResult: any;
+
+    // Call the appropriate service based on platform
+    if (post[0].platform === "linkedin") {
+      serviceResult = await linkedinService.postToLinkedIn(account.accessToken, {
+        content: post[0].content,
+        title: post[0].title,
+        hashtags: JSON.parse(post[0].hashtags || "[]"),
+        imageUrl: post[0].mediaUrl || undefined,
+      });
+    } else if (post[0].platform === "facebook") {
+      serviceResult = await metaService.postToFacebook(account.accessToken, account.accountId, {
+        content: post[0].content,
+        title: post[0].title,
+        hashtags: JSON.parse(post[0].hashtags || "[]"),
+        picture: post[0].mediaUrl || undefined,
+      });
+    } else if (post[0].platform === "instagram") {
+      if (!post[0].mediaUrl) {
+        throw new Error("Instagram posts require an image");
+      }
+      serviceResult = await metaService.postImageToInstagram(account.accessToken, account.accountId, {
+        content: post[0].content,
+        hashtags: JSON.parse(post[0].hashtags || "[]"),
+        imageUrl: post[0].mediaUrl,
+      });
+    } else {
+      throw new Error(`Platform ${post[0].platform} not yet supported for real posting`);
+    }
+
+    if (!serviceResult.success) {
+      throw new Error(serviceResult.message || "Unknown error during publishing");
+    }
 
     await db
       .update(generatedPosts)
       .set({
         status: "published",
         publishedAt: now,
+        externalPostId: serviceResult.id,
       })
       .where(eq(generatedPosts.id, postId));
 
-    // Log the publishing attempt
-    const logEntry: InsertPostingLog = {
+    // Log the success
+    await db.insert(postingLogs).values({
       userId,
-      agentConfigId: 0, // Would be set in production
-      generatedPostId: postId,
+      postId: postId,
       platform: post[0].platform,
       status: "success",
-      message: `Published to ${post[0].platform}`,
+      platformPostId: serviceResult.id,
+      errorMessage: `Published to ${post[0].platform}`,
       attemptedAt: now,
-      completedAt: now,
-    };
-
-    await db.insert(postingLogs).values(logEntry);
+    });
 
     return {
       success: true,
@@ -297,11 +383,89 @@ export async function publishPost(userId: number, postId: number): Promise<Posti
       message: `Successfully published to ${post[0].platform}`,
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[AI Agent] Publishing failed for post ${postId}:`, errorMessage);
+
+    // Retry logic (max 3 attempts)
+    if (retryCount < 2) {
+      console.log(`[AI Agent] Retrying post ${postId} (Attempt ${retryCount + 2})...`);
+      // Wait before retrying (exponential backoff could be better, but simple delay for now)
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      return publishPost(userId, postId, retryCount + 1);
+    }
+
+    await db
+      .update(generatedPosts)
+      .set({
+        status: "failed",
+      })
+      .where(eq(generatedPosts.id, postId));
+
+    // Log the failure
+    await db.insert(postingLogs).values({
+      userId,
+      postId: postId,
+      platform: post[0].platform,
+      status: "failed",
+      errorMessage: errorMessage,
+      attemptedAt: new Date(),
+    });
+
     return {
       success: false,
       platform: post[0].platform,
-      message: `Failed to publish post`,
-      error: error instanceof Error ? error.message : String(error),
+      message: `Failed to publish post: ${errorMessage}`,
+      error: errorMessage,
     };
   }
+}
+
+/**
+ * Find the selected social media account for a post based on agent configuration
+ */
+async function findSelectedAccount(db: any, post: any) {
+  // 1. Get agent configuration if available
+  if (post.agentId) {
+    const configs = await db
+      .select()
+      .from(aiAgentConfig)
+      .where(eq(aiAgentConfig.id, post.agentId))
+      .limit(1);
+
+    const config = configs[0];
+    if (config && config.selectedAccounts) {
+      const mappings = JSON.parse(config.selectedAccounts);
+      const selectedAccountId = mappings[post.platform];
+
+      if (selectedAccountId) {
+        const accounts = await db
+          .select()
+          .from(socialMediaAccounts)
+          .where(
+            and(
+              eq(socialMediaAccounts.id, selectedAccountId),
+              eq(socialMediaAccounts.isActive, true)
+            )
+          )
+          .limit(1);
+
+        if (accounts[0]) return accounts[0];
+      }
+    }
+  }
+
+  // 2. Fallback to first active account for this user/platform
+  const accounts = await db
+    .select()
+    .from(socialMediaAccounts)
+    .where(
+      and(
+        eq(socialMediaAccounts.userId, post.userId),
+        eq(socialMediaAccounts.platform, post.platform),
+        eq(socialMediaAccounts.isActive, true)
+      )
+    )
+    .limit(1);
+
+  return accounts[0] || null;
 }

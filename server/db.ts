@@ -1,17 +1,29 @@
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import Database from "better-sqlite3";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import path from "path";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      let dbPath = ENV.databaseUrl;
+
+      // If DATABASE_URL is a MySQL/Postgres string, ignore it for SQLite
+      if (!dbPath || dbPath.includes("://")) {
+        dbPath = path.join(process.cwd(), "data", "marketing_agency.db");
+      }
+
+      console.log(`[Database] Attempting to connect to SQLite at: ${dbPath}`);
+      const sqlite = new Database(dbPath);
+      _db = drizzle(sqlite);
+      console.log(`[Database] Successfully connected to SQLite`);
     } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+      console.error("[Database] CRITICAL: Failed to connect to SQLite:", error);
       _db = null;
     }
   }
@@ -68,7 +80,9 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    // SQLite upsert syntax
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
       set: updateSet,
     });
   } catch (error) {

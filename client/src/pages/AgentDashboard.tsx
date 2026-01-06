@@ -10,10 +10,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Plus, Zap, Calendar, Trash2, Copy, CheckCircle, Clock, AlertCircle, Linkedin, Facebook, Instagram } from "lucide-react";
+import { Loader2, Plus, Zap, Calendar, Trash2, Copy, CheckCircle, Clock, AlertCircle, Linkedin, Facebook, Instagram, ChevronDown, ChevronUp, Send } from "lucide-react";
 import { toast } from "sonner";
+import CalendarView from "@/components/CalendarView";
 import LinkedInIntegration from "@/components/LinkedInIntegration";
 import MetaPlatformsIntegration from "@/components/MetaPlatformsIntegration";
+import { trpc } from "@/lib/trpc";
+import AgentConfigDialog from "@/components/AgentConfigDialog";
 
 interface GeneratedPost {
   id: number;
@@ -24,13 +27,14 @@ interface GeneratedPost {
   status: "draft" | "scheduled" | "published" | "failed";
   createdAt: Date;
   scheduledAt?: Date;
+  mediaUrl?: string;
 }
 
 interface AgentConfig {
   id: number;
   agentName: string;
   isActive: boolean;
-  platforms: string[];
+  platforms: ("linkedin" | "facebook" | "twitter" | "instagram")[];
   contentStyle?: string;
   agencyInfo: {
     name: string;
@@ -38,109 +42,82 @@ interface AgentConfig {
     description?: string;
     achievements?: string[];
   };
+  postingSchedule?: {
+    time: string;
+    timezone: string;
+    daysOfWeek: number[];
+  };
+  nextRunAt?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export default function AgentDashboard() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
 
-  const [config, setConfig] = useState<AgentConfig | null>(null);
-  const [posts, setPosts] = useState<GeneratedPost[]>([]);
-  const [loading, setLoading] = useState(true);
+  /* TRPC Hooks */
+  const utils = trpc.useUtils();
+  const { data: configs, isLoading: configLoading } = trpc.aiAgent.getConfigs.useQuery() as { data: AgentConfig[] | undefined; isLoading: boolean };
+  const [currentAgentId, setCurrentAgentId] = useState<number | null>(null);
+
+  // Auto-select first agent if none selected
+  useEffect(() => {
+    if (configs && configs.length > 0 && currentAgentId === null) {
+      setCurrentAgentId(configs[0].id);
+    }
+  }, [configs, currentAgentId]);
+
+  const config = configs?.find(c => c.id === currentAgentId);
+
+  const { data: postsData, isLoading: postsLoading } = trpc.aiAgent.getPosts.useQuery({
+    limit: 50,
+    agentId: currentAgentId || undefined
+  });
+  const loading = configLoading || postsLoading;
+
+  const generateMutation = trpc.aiAgent.generateContent.useMutation();
+  const deleteMutation = trpc.aiAgent.deletePost.useMutation();
+  const scheduleMutation = trpc.aiAgent.schedulePost.useMutation();
+
   const [generating, setGenerating] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState("linkedin");
   const [tone, setTone] = useState("professional");
+  const [configOpen, setConfigOpen] = useState(false);
+  const [isEditingConfig, setIsEditingConfig] = useState(false);
+  const [expandedPosts, setExpandedPosts] = useState<number[]>([]);
+  const [scheduleDates, setScheduleDates] = useState<Record<number, string>>({});
+  const publishNowMutation = trpc.aiAgent.publishPostNow.useMutation();
+
+  // Parse posts data
+  const posts = (postsData || []).map(post => ({
+    ...post,
+    createdAt: new Date(post.createdAt),
+    scheduledAt: post.scheduledAt ? new Date(post.scheduledAt) : undefined
+  }));
+
+
 
   // Redirect if not authenticated
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       window.location.href = "/";
     }
-  }, [isAuthenticated]);
-
-  // Load agent configuration and posts
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        // In production, fetch from API using trpc
-        // const config = await trpc.aiAgent.getConfig.query();
-        // const posts = await trpc.aiAgent.getPosts.query({ limit: 20 });
-
-        // Mock data for demonstration
-        setConfig({
-          id: 1,
-          agentName: "BinaryKode Daily Poster",
-          isActive: true,
-          platforms: ["linkedin", "facebook", "twitter", "instagram"],
-          contentStyle: "Professional yet approachable, data-driven insights",
-          agencyInfo: {
-            name: "BinaryKode",
-            services: [
-              "Web Design & Development",
-              "Mobile App Development",
-              "AI Automation",
-              "Chat Bots",
-              "Graphic Design",
-              "Digital Marketing",
-            ],
-            description: "Transform Your Business with Technology Solutions",
-            achievements: ["500+ Happy Clients", "1000+ Projects Completed", "250% Average ROI"],
-          },
-        });
-
-        setPosts([
-          {
-            id: 1,
-            platform: "linkedin",
-            title: "Stop Guessing. Start Growing.",
-            content:
-              "In today's crowded digital landscape, simply being online isn't enough. You need a strategy that cuts through the noise and converts attention into revenue.",
-            hashtags: ["#DigitalMarketing", "#Strategy", "#Growth"],
-            status: "published",
-            createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-          },
-          {
-            id: 2,
-            platform: "facebook",
-            title: "Transform Your Digital Presence",
-            content:
-              "Is your brand whispering when it should be shouting? We don't just manage social media—we engineer digital conversations that drive real-world results.",
-            hashtags: ["#SocialMedia", "#Marketing", "#Business"],
-            status: "scheduled",
-            createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-            scheduledAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000),
-          },
-          {
-            id: 3,
-            platform: "twitter",
-            title: "Data-Driven Marketing Works",
-            content:
-              "Your competitors are already using advanced analytics to outpace you. We combine cutting-edge tools with creative excellence.",
-            hashtags: ["#Analytics", "#Marketing", "#DataDriven"],
-            status: "draft",
-            createdAt: new Date(),
-          },
-        ]);
-      } catch (error) {
-        console.error("Error loading data:", error);
-        toast.error("Failed to load agent configuration");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, []);
+  }, [isAuthenticated, authLoading]);
 
   const handleGenerateContent = async () => {
     try {
       setGenerating(true);
-      // In production: const post = await trpc.aiAgent.generateContent.mutate({ platform: selectedPlatform, tone });
+      await generateMutation.mutateAsync({
+        platform: selectedPlatform as any,
+        tone: tone as any,
+        agentId: currentAgentId || undefined
+      });
+      utils.aiAgent.getPosts.invalidate();
       toast.success(`Generated content for ${selectedPlatform}`);
-      // Add new post to list
+      // Switch to posts tab to see draft (optional, or just stay on generate)
     } catch (error) {
       console.error("Error generating content:", error);
-      toast.error("Failed to generate content");
+      toast.error(error instanceof Error ? error.message : "Failed to generate content");
     } finally {
       setGenerating(false);
     }
@@ -148,8 +125,8 @@ export default function AgentDashboard() {
 
   const handleDeletePost = async (postId: number) => {
     try {
-      // In production: await trpc.aiAgent.deletePost.mutate({ postId });
-      setPosts(posts.filter((p) => p.id !== postId));
+      await deleteMutation.mutateAsync({ postId });
+      utils.aiAgent.getPosts.invalidate();
       toast.success("Post deleted");
     } catch (error) {
       console.error("Error deleting post:", error);
@@ -157,16 +134,40 @@ export default function AgentDashboard() {
     }
   };
 
-  const handleSchedulePost = async (postId: number) => {
+  const handleSchedulePost = async (postId: number, date?: Date) => {
     try {
-      const scheduledTime = new Date();
-      scheduledTime.setDate(scheduledTime.getDate() + 1);
-      // In production: await trpc.aiAgent.schedulePost.mutate({ postId, scheduledAt: scheduledTime });
-      toast.success("Post scheduled for tomorrow");
+      const scheduledTime = date || new Date(Date.now() + 24 * 60 * 60 * 1000); // Default tomorrow if no date
+
+      // Ensure we have a valid date object
+      const safeDate = scheduledTime instanceof Date ? scheduledTime : new Date(scheduledTime);
+
+      await scheduleMutation.mutateAsync({
+        postId,
+        scheduledAt: safeDate
+      });
+      utils.aiAgent.getPosts.invalidate();
+      toast.success(`Post scheduled for ${safeDate.toLocaleString()}`);
     } catch (error) {
       console.error("Error scheduling post:", error);
       toast.error("Failed to schedule post");
     }
+  };
+
+  const handlePublishNow = async (postId: number) => {
+    try {
+      await publishNowMutation.mutateAsync({ postId });
+      utils.aiAgent.getPosts.invalidate();
+      toast.success("Post published successfully!");
+    } catch (error) {
+      console.error("Error publishing post now:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to publish post");
+    }
+  };
+
+  const toggleExpand = (postId: number) => {
+    setExpandedPosts(prev =>
+      prev.includes(postId) ? prev.filter(id => id !== postId) : [...prev, postId]
+    );
   };
 
   const getStatusIcon = (status: string) => {
@@ -201,6 +202,38 @@ export default function AgentDashboard() {
           <p className="body-text text-muted-foreground">
             Manage your automated social media posting and content generation
           </p>
+        </div>
+      </div>
+
+      <div className="bg-card/50 border-b border-border py-4">
+        <div className="container max-w-6xl mx-auto px-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Label className="text-sm font-medium">Select Project Agent:</Label>
+            <Select
+              value={currentAgentId?.toString() || ""}
+              onValueChange={(val) => setCurrentAgentId(Number(val))}
+            >
+              <SelectTrigger className="w-[200px] bg-background">
+                <SelectValue placeholder="Select Agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {configs?.map((c) => (
+                  <SelectItem key={c.id} value={c.id.toString()}>
+                    {c.agentName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setIsEditingConfig(true); setConfigOpen(true); }} disabled={!currentAgentId}>
+                Manage Agent
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => { setIsEditingConfig(false); setConfigOpen(true); }}>
+                <Plus className="w-4 h-4 mr-1" />
+                New Agent
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -240,7 +273,10 @@ export default function AgentDashboard() {
                 </div>
               </div>
 
-              <Button className="w-full mt-6 bg-accent hover:bg-accent/90">
+              <Button
+                className="w-full mt-6 bg-accent hover:bg-accent/90"
+                onClick={() => setConfigOpen(true)}
+              >
                 <Zap className="w-4 h-4 mr-2" />
                 Configure Agent
               </Button>
@@ -279,9 +315,10 @@ export default function AgentDashboard() {
           {/* Main Content - Tabs */}
           <div className="lg:col-span-2">
             <Tabs defaultValue="generate" className="w-full">
-              <TabsList className="grid w-full grid-cols-4 bg-card border border-border">
+              <TabsList className="grid w-full grid-cols-5 bg-card border border-border">
                 <TabsTrigger value="generate">Generate Content</TabsTrigger>
                 <TabsTrigger value="posts">Posts ({posts.length})</TabsTrigger>
+                <TabsTrigger value="calendar">Calendar</TabsTrigger>
                 <TabsTrigger value="linkedin">LinkedIn</TabsTrigger>
                 <TabsTrigger value="meta">Meta</TabsTrigger>
               </TabsList>
@@ -349,9 +386,20 @@ export default function AgentDashboard() {
                   <h4 className="headline-md text-sm text-foreground mb-3">Preview</h4>
                   <Textarea
                     placeholder="Generated content will appear here..."
-                    className="min-h-[200px] bg-background border-border text-foreground"
+                    className="min-h-[200px] bg-background border-border text-foreground mb-4"
                     readOnly
                   />
+                  {generateMutation.data?.imagePrompt && (
+                    <div className="p-4 bg-muted/30 rounded-lg border border-dashed border-border">
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Generated Image Preview</p>
+                      <img
+                        src={`https://placehold.co/1200x630/2563eb/ffffff?text=${encodeURIComponent("AI Generated Image Preview")}`}
+                        alt="Image preview"
+                        className="w-full h-auto rounded-md shadow-sm border border-border"
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-2 italic">Prompt: {generateMutation.data.imagePrompt}</p>
+                    </div>
+                  )}
                 </Card>
               </TabsContent>
 
@@ -375,8 +423,8 @@ export default function AgentDashboard() {
                                   post.status === "published"
                                     ? "default"
                                     : post.status === "scheduled"
-                                    ? "secondary"
-                                    : "outline"
+                                      ? "secondary"
+                                      : "outline"
                                 }
                               >
                                 {post.status}
@@ -399,51 +447,122 @@ export default function AgentDashboard() {
                         </div>
                       </div>
 
-                      <p className="body-text text-foreground/80 mb-3 text-sm line-clamp-2">
-                        {post.content}
-                      </p>
+                      {post.mediaUrl && (
+                        <div className="mb-3 rounded-md overflow-hidden border border-border aspect-video bg-muted flex items-center justify-center">
+                          <img
+                            src={post.mediaUrl}
+                            alt="Post Media"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
 
-                      <div className="flex items-center justify-between pt-3 border-t border-border">
-                        <div className="flex flex-wrap gap-1">
-                          {post.hashtags.slice(0, 3).map((tag, idx) => (
-                            <span key={idx} className="text-xs text-accent">
-                              {tag}
-                            </span>
-                          ))}
-                          {post.hashtags.length > 3 && (
-                            <span className="text-xs text-muted-foreground">+{post.hashtags.length - 3}</span>
+                      <div className="relative group">
+                        <p className={`body-text text-foreground/80 mb-3 text-sm ${expandedPosts.includes(post.id) ? '' : 'line-clamp-2'}`}>
+                          {post.content}
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs text-accent hover:text-accent/80 mb-2"
+                          onClick={() => toggleExpand(post.id)}
+                        >
+                          {expandedPosts.includes(post.id) ? (
+                            <><ChevronUp className="w-3 h-3 mr-1" /> Show Less</>
+                          ) : (
+                            <><ChevronDown className="w-3 h-3 mr-1" /> Read More</>
+                          )}
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-col space-y-3 pt-3 border-t border-border">
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-wrap gap-1">
+                            {post.hashtags.slice(0, 3).map((tag: string, idx: number) => (
+                              <span key={idx} className="text-xs text-accent">
+                                {tag}
+                              </span>
+                            ))}
+                            {post.hashtags.length > 3 && (
+                              <span className="text-xs text-muted-foreground">+{post.hashtags.length - 3}</span>
+                            )}
+                          </div>
+
+                          {post.status === "draft" && (
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePublishNow(post.id)}
+                                disabled={publishNowMutation.isPending}
+                                className="border-accent text-accent hover:bg-accent hover:text-white"
+                              >
+                                {publishNowMutation.isPending ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Send className="w-3 h-3 mr-1" />
+                                )}
+                                Publish Now
+                              </Button>
+                              <div className="flex gap-1">
+                                <Input
+                                  type="datetime-local"
+                                  className="h-8 w-[160px] text-[10px] bg-background border-border"
+                                  value={scheduleDates[post.id] || ""}
+                                  onChange={(e) => setScheduleDates(prev => ({ ...prev, [post.id]: e.target.value }))}
+                                />
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleSchedulePost(post.id, scheduleDates[post.id] ? new Date(scheduleDates[post.id]) : undefined)}
+                                  disabled={scheduleMutation.isPending}
+                                  className="bg-accent hover:bg-accent/90"
+                                >
+                                  {scheduleMutation.isPending ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <Calendar className="w-3 h-3 mr-1" />
+                                  )}
+                                  Schedule
+                                </Button>
+                              </div>
+                            </div>
                           )}
                         </div>
-
-                        {post.status === "draft" && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleSchedulePost(post.id)}
-                            className="bg-accent hover:bg-accent/90"
-                          >
-                            <Calendar className="w-3 h-3 mr-1" />
-                            Schedule
-                          </Button>
-                        )}
                       </div>
                     </Card>
                   ))
                 )}
               </TabsContent>
 
+              <TabsContent value="calendar" className="space-y-4">
+                <CalendarView posts={posts} onSchedulePost={(date) => {
+                  toast.info("Select a draft post to schedule for " + date.toLocaleDateString());
+                  // In a real app, this would open a dialog to pick a draft
+                }} />
+              </TabsContent>
+
               {/* LinkedIn Tab */}
               <TabsContent value="linkedin" className="space-y-4">
-                <LinkedInIntegration postId={posts[0]?.id} />
+                <LinkedInIntegration postId={posts.find(p => p.status === 'draft' || p.status === 'published')?.id} />
               </TabsContent>
 
               {/* Meta Tab */}
               <TabsContent value="meta" className="space-y-4">
-                <MetaPlatformsIntegration postId={posts[0]?.id} />
+                <MetaPlatformsIntegration postId={posts.find(p => p.status === 'draft' || p.status === 'published')?.id} />
               </TabsContent>
             </Tabs>
           </div>
         </div>
       </div>
+      <AgentConfigDialog
+        open={configOpen}
+        onOpenChange={setConfigOpen}
+        initialConfig={isEditingConfig ? config : undefined}
+        onConfigSaved={() => {
+          utils.aiAgent.getConfigs.invalidate();
+          utils.aiAgent.getConfig.invalidate();
+        }}
+      />
     </div>
   );
 }

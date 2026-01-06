@@ -38,17 +38,30 @@ export interface InstagramPostRequest extends MetaPostRequest {
   }>;
 }
 
+export interface FacebookPage {
+  id: string;
+  name: string;
+  access_token: string;
+  category: string;
+  tasks: string[];
+}
+
+export interface InstagramAccount {
+  id: string;
+  username?: string;
+  name?: string;
+}
+
 /**
  * Post to Facebook page
  */
 export async function postToFacebook(
+  accessToken: string,
+  pageId: string,
   request: FacebookPostRequest
 ): Promise<MetaPostResponse> {
-  const pageId = process.env.FACEBOOK_PAGE_ID;
-  const accessToken = process.env.META_ACCESS_TOKEN;
-
   if (!pageId || !accessToken) {
-    throw new Error("Facebook credentials not configured");
+    throw new Error("Facebook credentials missing");
   }
 
   try {
@@ -103,13 +116,12 @@ export async function postToFacebook(
  * Post image to Instagram
  */
 export async function postImageToInstagram(
+  accessToken: string,
+  accountId: string,
   request: InstagramPostRequest
 ): Promise<MetaPostResponse> {
-  const accountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
-  const accessToken = process.env.META_ACCESS_TOKEN;
-
   if (!accountId || !accessToken || !request.imageUrl) {
-    throw new Error("Instagram credentials or image URL not configured");
+    throw new Error("Instagram credentials or image URL missing");
   }
 
   try {
@@ -155,13 +167,12 @@ export async function postImageToInstagram(
  * Post video to Instagram
  */
 export async function postVideoToInstagram(
+  accessToken: string,
+  accountId: string,
   request: InstagramPostRequest
 ): Promise<MetaPostResponse> {
-  const accountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
-  const accessToken = process.env.META_ACCESS_TOKEN;
-
   if (!accountId || !accessToken || !request.videoUrl) {
-    throw new Error("Instagram credentials or video URL not configured");
+    throw new Error("Instagram credentials or video URL missing");
   }
 
   try {
@@ -208,13 +219,12 @@ export async function postVideoToInstagram(
  * Post carousel (multiple images) to Instagram
  */
 export async function postCarouselToInstagram(
+  accessToken: string,
+  accountId: string,
   request: InstagramPostRequest
 ): Promise<MetaPostResponse> {
-  const accountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
-  const accessToken = process.env.META_ACCESS_TOKEN;
-
   if (!accountId || !accessToken || !request.carouselItems || request.carouselItems.length === 0) {
-    throw new Error("Instagram credentials or carousel items not configured");
+    throw new Error("Instagram credentials or carousel items missing");
   }
 
   try {
@@ -397,6 +407,96 @@ export function handleMetaError(error: any): string {
   }
 
   return "Unknown error occurred";
+}
+
+/**
+ * Exchange OAuth code for short-lived access token
+ */
+export async function exchangeCodeForToken(code: string, redirectUri: string): Promise<string> {
+  const clientId = process.env.META_CLIENT_ID;
+  const clientSecret = process.env.META_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error("Meta client credentials missing");
+  }
+
+  try {
+    const response = await axios.get(`${FACEBOOK_API_BASE}/oauth/access_token`, {
+      params: {
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        code,
+      },
+    });
+
+    return response.data.access_token;
+  } catch (error) {
+    console.error("Error exchanging code for token:", (error as any).response?.data || (error as any).message);
+    throw new Error(`Failed to exchange Meta code: ${handleMetaError(error)}`);
+  }
+}
+
+/**
+ * Exchange short-lived token for long-lived token
+ */
+export async function exchangeTokenForLongLived(shortLivedToken: string): Promise<string> {
+  const clientId = process.env.META_CLIENT_ID;
+  const clientSecret = process.env.META_CLIENT_SECRET;
+
+  try {
+    const response = await axios.get(`${FACEBOOK_API_BASE}/oauth/access_token`, {
+      params: {
+        grant_type: "fb_exchange_token",
+        client_id: clientId,
+        client_secret: clientSecret,
+        fb_exchange_token: shortLivedToken,
+      },
+    });
+
+    return response.data.access_token;
+  } catch (error) {
+    console.error("Error extending token:", (error as any).response?.data || (error as any).message);
+    return shortLivedToken; // Fallback to short-lived
+  }
+}
+
+/**
+ * Get Facebook pages associated with a user token
+ */
+export async function getFacebookPages(accessToken: string): Promise<FacebookPage[]> {
+  try {
+    const response = await axios.get(`${FACEBOOK_API_BASE}/me/accounts`, {
+      params: {
+        access_token: accessToken,
+        fields: "id,name,access_token,category,tasks",
+      },
+    });
+
+    return response.data.data || [];
+  } catch (error) {
+    console.error("Error fetching Facebook pages:", (error as any).response?.data || (error as any).message);
+    throw new Error(`Failed to fetch Facebook pages: ${handleMetaError(error)}`);
+  }
+}
+
+/**
+ * Get Instagram business account linked to a Facebook page
+ */
+export async function getInstagramBusinessAccount(pageId: string, accessToken: string): Promise<InstagramAccount | null> {
+  try {
+    const response = await axios.get(`${FACEBOOK_API_BASE}/${pageId}`, {
+      params: {
+        fields: "instagram_business_account{id,username,name}",
+        access_token: accessToken,
+      },
+    });
+
+    return response.data.instagram_business_account || null;
+  } catch (error) {
+    console.error(`Error fetching IG account for page ${pageId}:`, (error as any).response?.data || (error as any).message);
+    return null;
+  }
 }
 
 /**

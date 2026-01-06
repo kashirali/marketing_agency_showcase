@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d6c531cf-de4b-4846-9024-262886960a5e",
-  "prevId": "7115fbcd-5ce2-42c5-8baf-40da8617b5e4",
+  "id": "b819aab1-b7b1-4e82-a8b2-56709c418eb1",
+  "prevId": "d6c531cf-de4b-4846-9024-262886960a5e",
   "tables": {
     "ai_agent_config": {
       "name": "ai_agent_config",
@@ -447,7 +447,7 @@
           "name": "openId",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "name": {
@@ -459,6 +459,13 @@
         },
         "email": {
           "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password": {
+          "name": "password",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -509,6 +516,13 @@
           "name": "users_openId_unique",
           "columns": [
             "openId"
+          ],
+          "isUnique": true
+        },
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "columns": [
+            "email"
           ],
           "isUnique": true
         }
