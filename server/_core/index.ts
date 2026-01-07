@@ -28,10 +28,8 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
-async function startServer() {
-  console.log("[Server] Starting with Phase 1 Foundation enhancements...");
+export async function createApp() {
   const app = express();
-  const server = createServer(app);
 
   // Configure body parser with larger size limit
   app.use(express.json({ limit: "50mb" }));
@@ -49,6 +47,14 @@ async function startServer() {
     })
   );
 
+  return app;
+}
+
+async function startServer() {
+  console.log("[Server] Starting with Phase 1 Foundation enhancements...");
+  const app = await createApp();
+  const server = createServer(app);
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -63,8 +69,9 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  // ✅ IMPORTANT: Bind to 0.0.0.0 for Render
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${port}/`);
 
     // Start background automation
     console.log("[Server] Initializing background automation scheduler...");
