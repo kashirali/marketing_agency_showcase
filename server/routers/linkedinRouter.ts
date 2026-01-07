@@ -2,7 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { socialMediaAccounts, generatedPosts, postingLogs, InsertPostingLog } from "../../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import {
   generateLinkedInAuthUrl,
   exchangeCodeForToken,
@@ -63,12 +63,12 @@ export const linkedinRouter = router({
           isActive: true,
         };
 
-        const result = await db.insert(socialMediaAccounts).values([accountData]);
+        const result = await db.insert(socialMediaAccounts).values([accountData]).returning({ id: socialMediaAccounts.id });
 
         return {
           success: true,
           message: "LinkedIn account connected successfully",
-          accountId: (result as any).lastInsertRowid,
+          accountId: result[0].id,
         };
       } catch (error) {
         console.error("Error handling LinkedIn callback:", error);
@@ -271,9 +271,9 @@ export const linkedinRouter = router({
 
     const stats = {
       totalAttempts: logs.length,
-      successful: logs.filter((l) => l.status === "success").length,
-      failed: logs.filter((l) => l.status === "failed").length,
-      pending: logs.filter((l) => l.status === "pending").length,
+      successful: logs.filter((l: any) => l.status === "success").length,
+      failed: logs.filter((l: any) => l.status === "failed").length,
+      pending: logs.filter((l: any) => l.status === "pending").length,
     };
 
     return stats;

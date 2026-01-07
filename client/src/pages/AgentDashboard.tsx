@@ -89,7 +89,7 @@ export default function AgentDashboard() {
   const publishNowMutation = trpc.aiAgent.publishPostNow.useMutation();
 
   // Parse posts data
-  const posts = (postsData || []).map(post => ({
+  const posts = (postsData || []).map((post: any) => ({
     ...post,
     createdAt: new Date(post.createdAt),
     scheduledAt: post.scheduledAt ? new Date(post.scheduledAt) : undefined
@@ -293,19 +293,19 @@ export default function AgentDashboard() {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">Published</span>
                   <span className="metric-text text-lg text-green-500">
-                    {posts.filter((p) => p.status === "published").length}
+                    {posts.filter((p: any) => p.status === "published").length}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">Scheduled</span>
                   <span className="metric-text text-lg text-blue-500">
-                    {posts.filter((p) => p.status === "scheduled").length}
+                    {posts.filter((p: any) => p.status === "scheduled").length}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">Drafts</span>
                   <span className="metric-text text-lg text-yellow-500">
-                    {posts.filter((p) => p.status === "draft").length}
+                    {posts.filter((p: any) => p.status === "draft").length}
                   </span>
                 </div>
               </div>
@@ -410,7 +410,7 @@ export default function AgentDashboard() {
                     <p className="text-muted-foreground">No posts generated yet</p>
                   </Card>
                 ) : (
-                  posts.map((post) => (
+                  posts.map((post: any) => (
                     <Card key={post.id} className="bg-card border border-border p-4 hover:border-accent transition-colors">
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-3">
@@ -543,12 +543,12 @@ export default function AgentDashboard() {
 
               {/* LinkedIn Tab */}
               <TabsContent value="linkedin" className="space-y-4">
-                <LinkedInIntegration postId={posts.find(p => p.status === 'draft' || p.status === 'published')?.id} />
+                <LinkedInIntegration postId={posts.find((p: any) => p.status === 'draft' || p.status === 'published')?.id} />
               </TabsContent>
 
               {/* Meta Tab */}
               <TabsContent value="meta" className="space-y-4">
-                <MetaPlatformsIntegration postId={posts.find(p => p.status === 'draft' || p.status === 'published')?.id} />
+                <MetaPlatformsIntegration postId={posts.find((p: any) => p.status === 'draft' || p.status === 'published')?.id} />
               </TabsContent>
             </Tabs>
           </div>

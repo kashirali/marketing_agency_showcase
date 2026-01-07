@@ -202,7 +202,7 @@ export default function LinkedInIntegration({ onAccountConnected, postId }: Link
           </div>
         ) : (
           <div className="space-y-3">
-            {accounts.map((account) => (
+            {accounts.map((account: any) => (
               <div
                 key={account.id}
                 className="flex items-center justify-between p-4 bg-background border border-border rounded-lg hover:border-accent transition-colors"

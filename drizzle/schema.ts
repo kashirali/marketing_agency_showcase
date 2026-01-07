@@ -1,189 +1,129 @@
-import { integer as sqliteInteger, sqliteTable, text as sqliteText } from "drizzle-orm/sqlite-core";
-import { int as mysqlInteger, mysqlTable, text as mysqlText, timestamp as mysqlTimestamp, varchar as mysqlVarchar } from "drizzle-orm/mysql-core";
+import { integer, pgTable, text, timestamp, serial, boolean, pgEnum } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-const isMysql = process.env.DATABASE_URL?.startsWith("mysql://");
-
-// Helper to define matching columns for both DBs
-function defineTable<T extends string>(name: T, sqliteCols: any, mysqlCols: any) {
-  return isMysql ? mysqlTable(name, mysqlCols) : sqliteTable(name, sqliteCols);
-}
+export const roleEnum = pgEnum("role", ["user", "admin"]);
+export const platformEnum = pgEnum("platform", ["linkedin", "facebook", "twitter", "instagram"]);
+export const postStatusEnum = pgEnum("post_status", ["draft", "scheduled", "published", "failed"]);
+export const mediaTypeEnum = pgEnum("media_type", ["image", "video", "carousel"]);
+export const logStatusEnum = pgEnum("log_status", ["success", "failed", "pending"]);
 
 /**
- * Core user table
+ * Core user table backing auth flow.
  */
-export const users = defineTable("users", {
-  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
-  openId: sqliteText("openId").unique(),
-  name: sqliteText("name"),
-  email: sqliteText("email").notNull().unique(),
-  password: sqliteText("password"),
-  loginMethod: sqliteText("loginMethod"),
-  role: sqliteText("role", { enum: ["user", "admin"] }).default("user").notNull(),
-  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  lastSignedIn: sqliteInteger("lastSignedIn", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-}, {
-  id: mysqlInteger("id").primaryKey().autoincrement(),
-  openId: mysqlVarchar("openId", { length: 255 }).unique(),
-  name: mysqlVarchar("name", { length: 255 }),
-  email: mysqlVarchar("email", { length: 255 }).notNull().unique(),
-  password: mysqlText("password"),
-  loginMethod: mysqlVarchar("loginMethod", { length: 50 }),
-  role: mysqlVarchar("role", { length: 20 }).default("user").notNull(),
-  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
-  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: mysqlTimestamp("lastSignedIn").defaultNow().notNull(),
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  openId: text("openId").unique(),
+  name: text("name"),
+  email: text("email").notNull().unique(),
+  password: text("password"),
+  loginMethod: text("loginMethod"),
+  role: roleEnum("role").default("user").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
 /**
- * Social media accounts
+ * Social media accounts configuration table
  */
-export const socialMediaAccounts = defineTable("social_media_accounts", {
-  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
-  userId: sqliteInteger("userId").notNull(),
-  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  accountName: sqliteText("accountName").notNull(),
-  accessToken: sqliteText("accessToken").notNull(),
-  refreshToken: sqliteText("refreshToken"),
-  accountId: sqliteText("accountId").notNull(),
-  isActive: sqliteInteger("isActive", { mode: "boolean" }).default(true).notNull(),
-  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-}, {
-  id: mysqlInteger("id").primaryKey().autoincrement(),
-  userId: mysqlInteger("userId").notNull(),
-  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
-  accountName: mysqlVarchar("accountName", { length: 255 }).notNull(),
-  accessToken: mysqlText("accessToken").notNull(),
-  refreshToken: mysqlText("refreshToken"),
-  accountId: mysqlVarchar("accountId", { length: 255 }).notNull(),
-  isActive: mysqlInteger("isActive").default(1).notNull(), // Booleans are 0/1 in MySQL
-  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
-  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+export const socialMediaAccounts = pgTable("social_media_accounts", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  platform: platformEnum("platform").notNull(),
+  accountName: text("accountName").notNull(),
+  accessToken: text("accessToken").notNull(),
+  refreshToken: text("refreshToken"),
+  accountId: text("accountId").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
+
+export type SocialMediaAccount = typeof socialMediaAccounts.$inferSelect;
+export type InsertSocialMediaAccount = typeof socialMediaAccounts.$inferInsert;
 
 /**
  * AI-generated social media posts
  */
-export const generatedPosts = defineTable("generated_posts", {
-  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
-  userId: sqliteInteger("userId").notNull(),
-  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  title: sqliteText("title").notNull(),
-  content: sqliteText("content").notNull(),
-  agentId: sqliteInteger("agentId"),
-  hashtags: sqliteText("hashtags"),
-  status: sqliteText("status", { enum: ["draft", "scheduled", "published", "failed"] }).default("draft").notNull(),
-  mediaUrl: sqliteText("mediaUrl"),
-  mediaType: sqliteText("mediaType", { enum: ["image", "video", "carousel"] }),
-  mediaPrompt: sqliteText("mediaPrompt"),
-  externalPostId: sqliteText("externalPostId"),
-  scheduledAt: sqliteInteger("scheduledAt", { mode: "timestamp" }),
-  publishedAt: sqliteInteger("publishedAt", { mode: "timestamp" }),
-  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-}, {
-  id: mysqlInteger("id").primaryKey().autoincrement(),
-  userId: mysqlInteger("userId").notNull(),
-  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
-  title: mysqlVarchar("title", { length: 255 }).notNull(),
-  content: mysqlText("content").notNull(),
-  agentId: mysqlInteger("agentId"),
-  hashtags: mysqlText("hashtags"),
-  status: mysqlVarchar("status", { length: 20 }).default("draft").notNull(),
-  mediaUrl: mysqlText("mediaUrl"),
-  mediaType: mysqlVarchar("mediaType", { length: 20 }),
-  mediaPrompt: mysqlText("mediaPrompt"),
-  externalPostId: mysqlVarchar("externalPostId", { length: 255 }),
-  scheduledAt: mysqlTimestamp("scheduledAt"),
-  publishedAt: mysqlTimestamp("publishedAt"),
-  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
+export const generatedPosts = pgTable("generated_posts", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  platform: platformEnum("platform").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  agentId: integer("agentId"),
+  hashtags: text("hashtags"),
+  status: postStatusEnum("status").default("draft").notNull(),
+  mediaUrl: text("mediaUrl"),
+  mediaType: mediaTypeEnum("mediaType"),
+  mediaPrompt: text("mediaPrompt"),
+  externalPostId: text("externalPostId"),
+  scheduledAt: timestamp("scheduledAt"),
+  publishedAt: timestamp("publishedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+export type GeneratedPost = typeof generatedPosts.$inferSelect;
+export type InsertGeneratedPost = typeof generatedPosts.$inferInsert;
 
 /**
  * AI Agent Configuration
  */
-export const aiAgentConfig = defineTable("ai_agent_config", {
-  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
-  userId: sqliteInteger("userId").notNull(),
-  agentName: sqliteText("agentName").notNull(),
-  isActive: sqliteInteger("isActive", { mode: "boolean" }).default(true).notNull(),
-  postingSchedule: sqliteText("postingSchedule"),
-  platforms: sqliteText("platforms"),
-  contentStyle: sqliteText("contentStyle"),
-  maxPostsPerDay: sqliteInteger("maxPostsPerDay").default(3).notNull(),
-  includeImages: sqliteInteger("includeImages", { mode: "boolean" }).default(true).notNull(),
-  includeHashtags: sqliteInteger("includeHashtags", { mode: "boolean" }).default(true).notNull(),
-  agencyInfo: sqliteText("agencyInfo"),
-  selectedAccounts: sqliteText("selectedAccounts"),
-  nextRunAt: sqliteInteger("nextRunAt", { mode: "timestamp" }),
-  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-}, {
-  id: mysqlInteger("id").primaryKey().autoincrement(),
-  userId: mysqlInteger("userId").notNull(),
-  agentName: mysqlVarchar("agentName", { length: 255 }).notNull(),
-  isActive: mysqlInteger("isActive").default(1).notNull(),
-  postingSchedule: mysqlText("postingSchedule"),
-  platforms: mysqlText("platforms"),
-  contentStyle: mysqlText("contentStyle"),
-  maxPostsPerDay: mysqlInteger("maxPostsPerDay").default(3).notNull(),
-  includeImages: mysqlInteger("includeImages").default(1).notNull(),
-  includeHashtags: mysqlInteger("includeHashtags").default(1).notNull(),
-  agencyInfo: mysqlText("agencyInfo"),
-  selectedAccounts: mysqlText("selectedAccounts"),
-  nextRunAt: mysqlTimestamp("nextRunAt"),
-  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
-  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+export const aiAgentConfig = pgTable("ai_agent_config", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  agentName: text("agentName").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  postingSchedule: text("postingSchedule"),
+  platforms: text("platforms"),
+  contentStyle: text("contentStyle"),
+  maxPostsPerDay: integer("maxPostsPerDay").default(3).notNull(),
+  includeImages: boolean("includeImages").default(true).notNull(),
+  includeHashtags: boolean("includeHashtags").default(true).notNull(),
+  agencyInfo: text("agencyInfo"),
+  selectedAccounts: text("selectedAccounts"),
+  nextRunAt: timestamp("nextRunAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
+
+export type AIAgentConfig = typeof aiAgentConfig.$inferSelect;
+export type InsertAIAgentConfig = typeof aiAgentConfig.$inferInsert;
 
 /**
  * Posting logs
  */
-export const postingLogs = defineTable("posting_logs", {
-  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
-  userId: sqliteInteger("userId").notNull(),
-  postId: sqliteInteger("postId").notNull(),
-  agentId: sqliteInteger("agentId"),
-  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  status: sqliteText("status", { enum: ["success", "failed", "pending"] }).notNull(),
-  platformPostId: sqliteText("platformPostId"),
-  errorMessage: sqliteText("errorMessage"),
-  attemptedAt: sqliteInteger("attemptedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-}, {
-  id: mysqlInteger("id").primaryKey().autoincrement(),
-  userId: mysqlInteger("userId").notNull(),
-  postId: mysqlInteger("postId").notNull(),
-  agentId: mysqlInteger("agentId"),
-  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
-  status: mysqlVarchar("status", { length: 20 }).notNull(),
-  platformPostId: mysqlVarchar("platformPostId", { length: 255 }),
-  errorMessage: mysqlText("errorMessage"),
-  attemptedAt: mysqlTimestamp("attemptedAt").defaultNow().notNull(),
+export const postingLogs = pgTable("posting_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  postId: integer("postId").notNull(),
+  agentId: integer("agentId"),
+  platform: platformEnum("platform").notNull(),
+  status: logStatusEnum("status").notNull(),
+  platformPostId: text("platformPostId"),
+  errorMessage: text("errorMessage"),
+  attemptedAt: timestamp("attemptedAt").defaultNow().notNull(),
 });
+
+export type PostingLog = typeof postingLogs.$inferSelect;
+export type InsertPostingLog = typeof postingLogs.$inferInsert;
 
 /**
  * Content templates
  */
-export const contentTemplates = defineTable("content_templates", {
-  id: sqliteInteger("id").primaryKey({ autoIncrement: true }),
-  userId: sqliteInteger("userId").notNull(),
-  name: sqliteText("name").notNull(),
-  platform: sqliteText("platform", { enum: ["linkedin", "facebook", "twitter", "instagram"] }).notNull(),
-  template: sqliteText("template").notNull(),
-  variables: sqliteText("variables"),
-  createdAt: sqliteInteger("createdAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-  updatedAt: sqliteInteger("updatedAt", { mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
-}, {
-  id: mysqlInteger("id").primaryKey().autoincrement(),
-  userId: mysqlInteger("userId").notNull(),
-  name: mysqlVarchar("name", { length: 255 }).notNull(),
-  platform: mysqlVarchar("platform", { length: 20 }).notNull(),
-  template: mysqlText("template").notNull(),
-  variables: mysqlText("variables"),
-  createdAt: mysqlTimestamp("createdAt").defaultNow().notNull(),
-  updatedAt: mysqlTimestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+export const contentTemplates = pgTable("content_templates", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  name: text("name").notNull(),
+  platform: platformEnum("platform").notNull(),
+  template: text("template").notNull(),
+  variables: text("variables"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
+
+export type ContentTemplate = typeof contentTemplates.$inferSelect;
+export type InsertContentTemplate = typeof contentTemplates.$inferInsert;

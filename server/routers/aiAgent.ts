@@ -53,9 +53,9 @@ export const aiAgentRouter = router({
         includeImages: true,
         includeHashtags: true,
         nextRunAt: calculateNextRunTime(input.postingTime, input.timezone),
-      });
+      }).returning({ id: aiAgentConfig.id });
 
-      return { success: true, agentId: Number((result as any).lastInsertRowid) };
+      return { success: true, agentId: result[0].id };
     }),
 
   /**
@@ -73,7 +73,7 @@ export const aiAgentRouter = router({
       .where(eq(aiAgentConfig.userId, ctx.user.id))
       .orderBy(desc(aiAgentConfig.createdAt));
 
-    return result.map(config => ({
+    return result.map((config: any) => ({
       ...config,
       platforms: JSON.parse(config.platforms || "[]"),
       postingSchedule: JSON.parse(config.postingSchedule || "{}"),
@@ -308,10 +308,10 @@ export const aiAgentRouter = router({
         status: "draft",
       };
 
-      const result = await db.insert(generatedPosts).values(insertData);
+      const result = await db.insert(generatedPosts).values(insertData).returning({ id: generatedPosts.id });
 
       return {
-        id: Number((result as any).lastInsertRowid),
+        id: result[0].id,
         ...content,
       };
     }),
@@ -385,9 +385,9 @@ export const aiAgentRouter = router({
           status: "draft",
         };
 
-        const result = await db.insert(generatedPosts).values(insertData);
+        const result = await db.insert(generatedPosts).values(insertData).returning({ id: generatedPosts.id });
         savedVariations.push({
-          id: Number((result as any).lastInsertRowid),
+          id: result[0].id,
           ...variation,
           mediaUrl,
         });
@@ -434,12 +434,12 @@ export const aiAgentRouter = router({
 
       // Filter in memory for simplicity in this migration step
       const filteredPosts = posts
-        .filter((post) => !input.status || post.status === input.status)
-        .filter((post) => !input.platform || post.platform === input.platform)
-        .filter((post) => !input.agentId || post.agentId === input.agentId)
+        .filter((post: any) => !input.status || post.status === input.status)
+        .filter((post: any) => !input.platform || post.platform === input.platform)
+        .filter((post: any) => !input.agentId || post.agentId === input.agentId)
         .slice(0, input.limit);
 
-      return filteredPosts.map((post) => ({
+      return filteredPosts.map((post: any) => ({
         ...post,
         hashtags: post.hashtags ? JSON.parse(post.hashtags) : [],
       }));

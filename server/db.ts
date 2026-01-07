@@ -1,7 +1,10 @@
-import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
-import path from "path";
+import { eq } from "drizzle-orm";
+
+const { Pool } = pg;
 
 let _db: any = null;
 
@@ -9,41 +12,36 @@ let _db: any = null;
 export async function getDb() {
   if (!_db) {
     try {
-      const dbUrl = ENV.databaseUrl;
-      const isMysql = dbUrl?.startsWith("mysql://");
-
-      if (isMysql) {
-        console.log("[Database] Connecting to MySQL...");
-        const { drizzle: drizzleMysql } = await import("drizzle-orm/mysql2");
-        const mysql = (await import("mysql2/promise")).default;
-
-        // TiDB Cloud and other managed DBs often require SSL
-        const connection = await mysql.createConnection({
-          uri: dbUrl,
-          ssl: {
-            rejectUnauthorized: true
-          }
-        });
-
-        _db = drizzleMysql(connection);
-        console.log("[Database] Successfully connected to MySQL");
-      } else {
-        console.log("[Database] Connecting to SQLite...");
-        const { drizzle: drizzleSqlite } = await import("drizzle-orm/better-sqlite3");
-        const Database = (await import("better-sqlite3")).default;
-
-        let dbPath = dbUrl;
-        if (!dbPath || dbPath.includes("://")) {
-          dbPath = path.join(process.cwd(), "data", "marketing_agency.db");
-        }
-        console.log(`[Database] Connecting to SQLite at: ${dbPath}`);
-        const sqlite = new Database(dbPath);
-        _db = drizzleSqlite(sqlite);
-        console.log("[Database] Successfully connected to SQLite");
+      let dbUrl = ENV.databaseUrl;
+      if (!dbUrl) {
+        throw new Error("DATABASE_URL is not defined in environment variables");
       }
+
+      // Cleanup dbUrl if it was copied with the variable name prefix
+      if (dbUrl.includes("DATABASE_URL=")) {
+        dbUrl = dbUrl.split("DATABASE_URL=")[1].trim();
+      }
+
+      console.log("[Database] Connecting to PostgreSQL...");
+
+      const isExternal = dbUrl.includes("render.com") || dbUrl.includes("aws") || dbUrl.includes("elephantsql") || dbUrl.includes("ssl=true");
+
+      const pool = new Pool({
+        connectionString: dbUrl,
+        ssl: isExternal ? { rejectUnauthorized: false } : false,
+      });
+
+      // Test the connection immediately
+      const client = await pool.connect();
+      console.log("[Database] Connection pool established successfully");
+      client.release();
+
+      _db = drizzle(pool);
+      console.log("[Database] Successfully connected to PostgreSQL");
     } catch (error) {
       console.error("[Database] CRITICAL: Failed to connect:", error);
       _db = null;
+      throw error;
     }
   }
   return _db;
@@ -63,55 +61,29 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   try {
     const values: any = {
       openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
-
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
+      name: user.name ?? null,
+      email: user.email,
+      loginMethod: user.loginMethod ?? null,
+      role: user.role ?? 'user',
+      lastSignedIn: user.lastSignedIn ?? new Date(),
     };
 
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
+    if (user.openId === ENV.ownerOpenId) {
       values.role = 'admin';
-      updateSet.role = 'admin';
     }
 
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    // Drizzle handles upsert differently for MySQL and SQLite
-    const isMysql = ENV.databaseUrl?.startsWith("mysql://");
-
-    if (isMysql) {
-      await db.insert(users).values(values).onDuplicateKeyUpdate({
-        set: updateSet,
-      });
-    } else {
-      await db.insert(users).values(values).onConflictDoUpdate({
-        target: users.openId,
-        set: updateSet,
-      });
-    }
+    // PostgreSQL onConflictDoUpdate
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
+      set: {
+        name: values.name,
+        email: values.email,
+        loginMethod: values.loginMethod,
+        role: values.role,
+        lastSignedIn: values.lastSignedIn,
+        updatedAt: new Date(),
+      },
+    });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -129,5 +101,3 @@ export async function getUserByOpenId(openId: string) {
 
   return result.length > 0 ? result[0] : undefined;
 }
-
-// TODO: add feature queries here as your schema grows.

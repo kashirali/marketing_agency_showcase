@@ -220,9 +220,9 @@ export async function getPostingStats(userId: number): Promise<{
 
   const stats = {
     totalGenerated: posts.length,
-    totalScheduled: posts.filter((p) => p.status === "scheduled").length,
-    totalPublished: posts.filter((p) => p.status === "published").length,
-    totalFailed: posts.filter((p) => p.status === "failed").length,
+    totalScheduled: posts.filter((p: any) => p.status === "scheduled").length,
+    totalPublished: posts.filter((p: any) => p.status === "published").length,
+    totalFailed: posts.filter((p: any) => p.status === "failed").length,
     platformBreakdown: {} as Record<string, number>,
   };
 
@@ -276,11 +276,11 @@ export async function triggerManualPosting(userId: number, agentConfigId: number
         status: "draft" as const,
       };
 
-      const result = await db.insert(generatedPosts).values([insertData]);
+      const result = await db.insert(generatedPosts).values([insertData]).returning({ id: generatedPosts.id });
 
       results.push({
         success: true,
-        postId: Number((result as any).lastInsertRowid),
+        postId: result[0].id,
         platform,
         message: `Successfully generated content for ${platform}`,
       });

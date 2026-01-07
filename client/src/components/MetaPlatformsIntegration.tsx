@@ -186,7 +186,7 @@ export default function MetaPlatformsIntegration({ postId }: MetaPlatformsIntegr
         <div className="mb-6 space-y-2">
           <Label className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Connected Profiles</Label>
           <div className="flex flex-wrap gap-2">
-            {connectedAccounts.filter(a => a.platform === 'facebook' || a.platform === 'instagram').map(account => (
+            {(connectedAccounts || []).filter((a: any) => a.platform === 'facebook' || a.platform === 'instagram').map((account: any) => (
               <Badge key={account.id} variant="secondary" className="pl-1 pr-2 py-1 flex items-center gap-2 bg-background border border-border">
                 {account.platform === 'facebook' ? <Facebook className="w-3 h-3 text-[#1877F2]" /> : <Instagram className="w-3 h-3 text-[#E1306C]" />}
                 <span className="text-xs font-medium">{account.accountName}</span>
@@ -242,7 +242,7 @@ export default function MetaPlatformsIntegration({ postId }: MetaPlatformsIntegr
                 </div>
               )}
 
-              {connectedAccounts && connectedAccounts.filter(a => a.platform === 'facebook').length > 0 && (
+              {connectedAccounts && (connectedAccounts || []).filter((a: any) => a.platform === 'facebook').length > 0 && (
                 <div>
                   <Label className="text-sm font-medium text-foreground mb-2 block">Posting to Page</Label>
                   <select
@@ -251,7 +251,7 @@ export default function MetaPlatformsIntegration({ postId }: MetaPlatformsIntegr
                     onChange={(e) => setSelectedFbAccount(Number(e.target.value))}
                   >
                     {!selectedFbAccount && <option value="">Select a page...</option>}
-                    {connectedAccounts.filter(a => a.platform === 'facebook').map(a => (
+                    {connectedAccounts.filter((a: any) => a.platform === 'facebook').map((a: any) => (
                       <option key={a.id} value={a.id}>{a.accountName}</option>
                     ))}
                   </select>
@@ -380,7 +380,7 @@ export default function MetaPlatformsIntegration({ postId }: MetaPlatformsIntegr
                 </div>
               )}
 
-              {connectedAccounts && connectedAccounts.filter(a => a.platform === 'instagram').length > 0 && (
+              {connectedAccounts && (connectedAccounts || []).filter((a: any) => a.platform === 'instagram').length > 0 && (
                 <div>
                   <Label className="text-sm font-medium text-foreground mb-2 block">Posting to Instagram Account</Label>
                   <select
@@ -389,7 +389,7 @@ export default function MetaPlatformsIntegration({ postId }: MetaPlatformsIntegr
                     onChange={(e) => setSelectedIgAccount(Number(e.target.value))}
                   >
                     {!selectedIgAccount && <option value="">Select an account...</option>}
-                    {connectedAccounts.filter(a => a.platform === 'instagram').map(a => (
+                    {connectedAccounts.filter((a: any) => a.platform === 'instagram').map((a: any) => (
                       <option key={a.id} value={a.id}>{a.accountName}</option>
                     ))}
                   </select>

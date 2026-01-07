@@ -152,8 +152,8 @@ export default function AgentConfigDialog({ open, onOpenChange, initialConfig, o
             <div className="grid gap-4 p-4 border rounded-lg bg-muted/50">
               <Label className="font-semibold">Platform Accounts</Label>
               <div className="grid gap-4">
-                {platforms.map(platform => {
-                  const platformAccounts = connectedAccounts.filter(a => a.platform === platform);
+                {platforms.map((platform: string) => {
+                  const platformAccounts = connectedAccounts.filter((a: any) => a.platform === platform);
                   if (platformAccounts.length === 0) return null;
 
                   return (
@@ -167,7 +167,7 @@ export default function AgentConfigDialog({ open, onOpenChange, initialConfig, o
                           <SelectValue placeholder="Select account" />
                         </SelectTrigger>
                         <SelectContent>
-                          {platformAccounts.map(account => (
+                          {platformAccounts.map((account: any) => (
                             <SelectItem key={account.id} value={account.id.toString()}>
                               {account.accountName}
                             </SelectItem>

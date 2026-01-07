@@ -399,7 +399,7 @@ export const metaRouter = router({
             .insert(socialMediaAccounts)
             .values(fbAccount)
             .onConflictDoUpdate({
-              target: [socialMediaAccounts.userId, socialMediaAccounts.platform, socialMediaAccounts.accountId],
+              target: [socialMediaAccounts.id],
               set: {
                 accessToken: fbAccount.accessToken,
                 accountName: fbAccount.accountName,
@@ -427,7 +427,7 @@ export const metaRouter = router({
               .insert(socialMediaAccounts)
               .values(igAccount)
               .onConflictDoUpdate({
-                target: [socialMediaAccounts.userId, socialMediaAccounts.platform, socialMediaAccounts.accountId],
+                target: [socialMediaAccounts.id],
                 set: {
                   accessToken: igAccount.accessToken,
                   accountName: igAccount.accountName,
@@ -489,13 +489,13 @@ export const metaRouter = router({
     const stats = {
       facebook: {
         totalAttempts: facebookLogs.length,
-        successful: facebookLogs.filter((l) => l.status === "success").length,
-        failed: facebookLogs.filter((l) => l.status === "failed").length,
+        successful: facebookLogs.filter((l: any) => l.status === "success").length,
+        failed: facebookLogs.filter((l: any) => l.status === "failed").length,
       },
       instagram: {
         totalAttempts: instagramLogs.length,
-        successful: instagramLogs.filter((l) => l.status === "success").length,
-        failed: instagramLogs.filter((l) => l.status === "failed").length,
+        successful: instagramLogs.filter((l: any) => l.status === "success").length,
+        failed: instagramLogs.filter((l: any) => l.status === "failed").length,
       },
     };
 
