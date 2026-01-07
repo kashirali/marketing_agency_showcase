@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { Card } from "@/components/ui/card";
-import { Heart, MessageCircle, Share2, TrendingUp } from "lucide-react";
+import { Heart, MessageCircle, Share2, TrendingUp, Shield } from "lucide-react";
 import { useState, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -331,6 +331,26 @@ export default function Home() {
           </Button>
         </div>
       </section>
+
+      {/* Footer */}
+      <footer className="py-8 bg-background border-t border-border">
+        <div className="container max-w-7xl mx-auto px-4 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Shield className="h-4 w-4" />
+            <span>© {new Date().getFullYear()} Social Media Automation Platform</span>
+          </div>
+          <div className="flex gap-6">
+            <Link href="/privacy-policy">
+              <span className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer">
+                Privacy Policy
+              </span>
+            </Link>
+            <span className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer">
+              Terms of Service
+            </span>
+          </div>
+        </div>
+      </footer>
 
       <style>{`
         @keyframes fadeIn {

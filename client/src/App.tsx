@@ -9,6 +9,7 @@ import AgentDashboard from "./pages/AgentDashboard";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 function Router() {
   // make sure to consider if you need authentication function Router() {
@@ -17,6 +18,7 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/login"} component={Login} />
       <Route path="/register" component={Register} />
+      <Route path="/privacy-policy" component={PrivacyPolicy} />
       <Route path={"/agent-dashboard"} component={AgentDashboard} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
