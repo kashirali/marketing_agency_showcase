@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
     "build:client": "vite build",
-    "build:server": "esbuild server/_core/index.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --format=esm --external:better-sqlite3 --external:pg-native --external:mysql2 --external:fsevents --external:@tailwindcss/oxide --external:lightningcss --external:@babel/core",
+    "build:server": "esbuild server/_core/index.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --format=esm --external:better-sqlite3 --external:pg-native --external:mysql2 --external:fsevents --external:@tailwindcss/oxide --external:lightningcss --external:@babel/core --external:./server/_core/vite --external:vite",
     "build": "npm run build:client && npm run build:server",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
