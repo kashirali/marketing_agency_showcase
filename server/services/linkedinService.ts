@@ -44,7 +44,7 @@ export function generateLinkedInAuthUrl(): string {
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: "w_member_social r_organization_social",
+    scope: "openid profile email w_member_social",
     state: generateRandomState(),
   });
 
