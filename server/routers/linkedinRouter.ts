@@ -33,15 +33,14 @@ export const linkedinRouter = router({
   /**
    * Handle OAuth callback and store LinkedIn credentials
    */
-  handleCallback: publicProcedure
+  handleCallback: protectedProcedure
     .input(
       z.object({
         code: z.string(),
-        userId: z.number(),
         accountName: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database not available");
 
@@ -54,12 +53,12 @@ export const linkedinRouter = router({
 
         // Store LinkedIn account in database
         const accountData = {
-          userId: input.userId,
+          userId: ctx.user.id,
           platform: "linkedin" as const,
-          accountName: input.accountName || userProfile.localizedFirstName || "LinkedIn Account",
+          accountName: input.accountName || userProfile.name || userProfile.given_name || "LinkedIn Account",
           accessToken: tokenResponse.access_token,
           refreshToken: tokenResponse.refresh_token,
-          accountId: userProfile.id,
+          accountId: userProfile.sub,
           isActive: true,
         };
 
@@ -166,8 +165,20 @@ export const linkedinRouter = router({
         };
 
         const postResult = input.postToOrganization
-          ? await postToLinkedInOrganization(accessToken, postRequest as any)
-          : await postToLinkedIn(accessToken, postRequest as any);
+          ? await postToLinkedInOrganization(
+            accessToken,
+            postRequest as any,
+            account[0].accountId.startsWith("urn:li:organization:")
+              ? account[0].accountId
+              : `urn:li:organization:${account[0].accountId}`
+          )
+          : await postToLinkedIn(
+            accessToken,
+            postRequest as any,
+            account[0].accountId.startsWith("urn:li:person:")
+              ? account[0].accountId
+              : `urn:li:person:${account[0].accountId}`
+          );
 
         if (!postResult.success) {
           throw new Error(postResult.message);

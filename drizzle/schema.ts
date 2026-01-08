@@ -1,4 +1,4 @@
-import { integer, pgTable, text, timestamp, serial, boolean, pgEnum } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, serial, boolean, pgEnum, unique } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const roleEnum = pgEnum("role", ["user", "admin"]);
@@ -40,6 +40,10 @@ export const socialMediaAccounts = pgTable("social_media_accounts", {
   isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => {
+  return [
+    unique("social_media_accounts_userId_platform_accountId_unique").on(table.userId, table.platform, table.accountId)
+  ];
 });
 
 export type SocialMediaAccount = typeof socialMediaAccounts.$inferSelect;

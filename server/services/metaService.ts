@@ -462,18 +462,22 @@ export async function exchangeTokenForLongLived(shortLivedToken: string): Promis
 }
 
 /**
- * Get Facebook pages associated with a user token
+ * Get Facebook pages associated with a user token (with pagination)
  */
 export async function getFacebookPages(accessToken: string): Promise<FacebookPage[]> {
   try {
-    const response = await axios.get(`${FACEBOOK_API_BASE}/me/accounts`, {
-      params: {
-        access_token: accessToken,
-        fields: "id,name,access_token,category,tasks",
-      },
-    });
+    let allPages: FacebookPage[] = [];
+    let nextUrl: string | null = `${FACEBOOK_API_BASE}/me/accounts?access_token=${accessToken}&fields=id,name,access_token,category,tasks&limit=100`;
 
-    return response.data.data || [];
+    while (nextUrl) {
+      const response: any = await axios.get(nextUrl);
+      const data = response.data.data || [];
+      allPages = [...allPages, ...data];
+      nextUrl = response.data.paging?.next || null;
+    }
+
+    // Filter out pages that don't have an access_token (though they usually do if returned here)
+    return allPages.filter(page => !!page.access_token);
   } catch (error) {
     console.error("Error fetching Facebook pages:", (error as any).response?.data || (error as any).message);
     throw new Error(`Failed to fetch Facebook pages: ${handleMetaError(error)}`);

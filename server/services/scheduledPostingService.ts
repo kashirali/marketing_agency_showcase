@@ -326,12 +326,16 @@ export async function publishPost(userId: number, postId: number, retryCount: nu
 
     // Call the appropriate service based on platform
     if (post[0].platform === "linkedin") {
+      const authorUrn = account.accountId.startsWith("urn:li:person:") || account.accountId.startsWith("urn:li:organization:")
+        ? account.accountId
+        : `urn:li:person:${account.accountId}`;
+
       serviceResult = await linkedinService.postToLinkedIn(account.accessToken, {
         content: post[0].content,
         title: post[0].title,
         hashtags: JSON.parse(post[0].hashtags || "[]"),
         imageUrl: post[0].mediaUrl || undefined,
-      });
+      }, authorUrn);
     } else if (post[0].platform === "facebook") {
       serviceResult = await metaService.postToFacebook(account.accessToken, account.accountId, {
         content: post[0].content,

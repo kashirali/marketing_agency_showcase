@@ -381,62 +381,105 @@ export const metaRouter = router({
         // 3. Get Facebook Pages
         const pages = await getFacebookPages(longToken);
 
+        const processedAccountIds: string[] = [];
         const results = [];
 
         for (const page of pages) {
-          // 4. Store Facebook Page
+          // 4. Skip pages without an access_token (though getFacebookPages filters them now)
+          if (!page.access_token) {
+            console.warn(`[Meta] Skipping page ${page.name} (${page.id}) - No access token provided`);
+            continue;
+          }
+
+          // 5. Store Facebook Page
           const fbAccount = {
             userId: ctx.user.id,
             platform: "facebook" as const,
             accountName: page.name,
             accountId: page.id,
-            accessToken: page.access_token, // Page token is better for permanent posting
+            accessToken: page.access_token,
             isActive: true,
+            updatedAt: new Date(),
           };
 
-          // Upsert FB page
+          // Upsert FB page - using the new unique constraint target
           await db
             .insert(socialMediaAccounts)
             .values(fbAccount)
             .onConflictDoUpdate({
-              target: [socialMediaAccounts.id],
+              target: [socialMediaAccounts.userId, socialMediaAccounts.platform, socialMediaAccounts.accountId],
               set: {
                 accessToken: fbAccount.accessToken,
                 accountName: fbAccount.accountName,
                 isActive: true,
-                updatedAt: new Date(),
+                updatedAt: fbAccount.updatedAt,
               }
             });
 
+          processedAccountIds.push(page.id);
           results.push({ platform: "facebook", name: page.name });
 
-          // 5. Check for Instagram account
-          const igAccountData = await getInstagramBusinessAccount(page.id, page.access_token);
-          if (igAccountData) {
-            const igAccount = {
-              userId: ctx.user.id,
-              platform: "instagram" as const,
-              accountName: igAccountData.username || igAccountData.name || `IG via ${page.name}`,
-              accountId: igAccountData.id,
-              accessToken: page.access_token, // IG Graph API uses the page access token
-              isActive: true,
-            };
+          // 6. Check for Instagram account
+          try {
+            const igAccountData = await getInstagramBusinessAccount(page.id, page.access_token);
+            if (igAccountData) {
+              const igAccount = {
+                userId: ctx.user.id,
+                platform: "instagram" as const,
+                accountName: igAccountData.username || igAccountData.name || `IG via ${page.name}`,
+                accountId: igAccountData.id,
+                accessToken: page.access_token, // IG Graph API uses the page access token
+                isActive: true,
+                updatedAt: new Date(),
+              };
 
-            // Upsert IG account
+              // Upsert IG account
+              await db
+                .insert(socialMediaAccounts)
+                .values(igAccount)
+                .onConflictDoUpdate({
+                  target: [socialMediaAccounts.userId, socialMediaAccounts.platform, socialMediaAccounts.accountId],
+                  set: {
+                    accessToken: igAccount.accessToken,
+                    accountName: igAccount.accountName,
+                    isActive: true,
+                    updatedAt: igAccount.updatedAt,
+                  }
+                });
+
+              processedAccountIds.push(igAccountData.id);
+              results.push({ platform: "instagram", name: igAccount.accountName });
+            }
+          } catch (igError) {
+            console.error(`[Meta] Error processing IG for page ${page.name}:`, igError);
+          }
+        }
+
+        // 7. "Sync" logic: Deactivate/Remove accounts that were not in the current response
+        // This handles cases where a user unchecks a page in the Meta dialog
+        const existingMetaAccounts = await db
+          .select({ accountId: socialMediaAccounts.accountId, platform: socialMediaAccounts.platform })
+          .from(socialMediaAccounts)
+          .where(
+            and(
+              eq(socialMediaAccounts.userId, ctx.user.id),
+              or(eq(socialMediaAccounts.platform, "facebook"), eq(socialMediaAccounts.platform, "instagram"))
+            )
+          );
+
+        for (const account of existingMetaAccounts) {
+          if (!processedAccountIds.includes(account.accountId)) {
+            console.log(`[Meta] Removing/Deactivating revoked account: ${account.platform} ${account.accountId}`);
+            // We'll delete it to keep the database clean as requested ("it should be removed from our app as well")
             await db
-              .insert(socialMediaAccounts)
-              .values(igAccount)
-              .onConflictDoUpdate({
-                target: [socialMediaAccounts.id],
-                set: {
-                  accessToken: igAccount.accessToken,
-                  accountName: igAccount.accountName,
-                  isActive: true,
-                  updatedAt: new Date(),
-                }
-              });
-
-            results.push({ platform: "instagram", name: igAccount.accountName });
+              .delete(socialMediaAccounts)
+              .where(
+                and(
+                  eq(socialMediaAccounts.userId, ctx.user.id),
+                  eq(socialMediaAccounts.accountId, account.accountId),
+                  eq(socialMediaAccounts.platform, account.platform)
+                )
+              );
           }
         }
 

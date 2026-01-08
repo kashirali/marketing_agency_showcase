@@ -83,7 +83,6 @@ export default function LinkedInIntegration({ onAccountConnected, postId }: Link
       // For now, let's try calling it.
       await handleCallbackMutation.mutateAsync({
         code,
-        userId: 1, // Placeholder, see below
         accountName: "LinkedIn User" // Optional
       });
 

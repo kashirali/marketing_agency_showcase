@@ -122,10 +122,9 @@ export async function refreshAccessToken(refreshToken: string): Promise<LinkedIn
  */
 export async function getUserProfile(accessToken: string): Promise<any> {
   try {
-    const response = await axios.get(`${LINKEDIN_API_BASE}/me`, {
+    const response = await axios.get("https://api.linkedin.com/v2/userinfo", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        "LinkedIn-Version": "202401",
       },
     });
 
@@ -142,16 +141,17 @@ export async function getUserProfile(accessToken: string): Promise<any> {
  */
 export async function postToLinkedIn(
   accessToken: string,
-  request: LinkedInPostRequest
+  request: LinkedInPostRequest,
+  authorUrn?: string
 ): Promise<LinkedInPostResponse> {
   try {
     const postContent = formatLinkedInPost(request);
 
     const payload: any = {
-      author: "urn:li:person:me",
+      author: authorUrn || "urn:li:person:me",
       lifecycleState: "PUBLISHED",
       specificContent: {
-        "com.linkedin.ugc.PublishContent": {
+        "com.linkedin.ugc.ShareContent": {
           shareCommentary: {
             text: postContent,
           },
@@ -165,9 +165,8 @@ export async function postToLinkedIn(
 
     if (request.imageUrl) {
       // If we have an image, we need to upload it first and get the URN
-      // In a real flow, the caller might pass the URN directly or we upload here
-      const assetUrn = await uploadImageToLinkedIn(accessToken, request.imageUrl);
-      payload.specificContent["com.linkedin.ugc.PublishContent"].media = [
+      const assetUrn = await uploadImageToLinkedIn(accessToken, request.imageUrl, authorUrn || "urn:li:person:me");
+      payload.specificContent["com.linkedin.ugc.ShareContent"].media = [
         {
           status: "READY",
           description: {
@@ -215,14 +214,15 @@ export async function postToLinkedIn(
  */
 export async function uploadImageToLinkedIn(
   accessToken: string,
-  imageUrl: string
+  imageUrl: string,
+  ownerUrn?: string
 ): Promise<string> {
   try {
     // 1. Register the upload
     const registerPayload = {
       registerUploadRequest: {
         recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
-        owner: "urn:li:person:me",
+        owner: ownerUrn || "urn:li:person:me",
         serviceRelationships: [
           {
             relationshipType: "OWNER",
@@ -268,7 +268,8 @@ export async function uploadImageToLinkedIn(
  */
 export async function postToLinkedInOrganization(
   accessToken: string,
-  request: LinkedInPostRequest
+  request: LinkedInPostRequest,
+  organizationUrn?: string
 ): Promise<LinkedInPostResponse> {
   const organizationId = process.env.LINKEDIN_ORGANIZATION_ID;
 
@@ -280,10 +281,10 @@ export async function postToLinkedInOrganization(
     const postContent = formatLinkedInPost(request);
 
     const payload = {
-      author: `urn:li:organization:${organizationId}`,
+      author: organizationUrn || `urn:li:organization:${organizationId}`,
       lifecycleState: "PUBLISHED",
       specificContent: {
-        "com.linkedin.ugc.PublishContent": {
+        "com.linkedin.ugc.ShareContent": {
           shareCommentary: {
             text: postContent,
           },
